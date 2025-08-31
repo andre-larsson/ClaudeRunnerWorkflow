@@ -1,219 +1,158 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Multi-runner orchestration system for Claude CLI tasks using JSON configuration.
 
 ## Project Purpose
 
-This project is a JSON-configurable bash script for orchestrating Claude CLI commands to build and develop projects iteratively. The script runs initial setup prompts, then continuously executes loop prompts with configurable periodicity until exit conditions are met.
+JSON-configurable bash script that orchestrates Claude CLI commands for iterative development. Supports multiple runners working on the same task with different approaches for comparison.
 
 ## Prerequisites
 
-- Claude CLI properly configured with `.claude/settings.json`
-- `jq` JSON processor (usually pre-installed, or `brew install jq` / `sudo apt-get install jq`)
-- Claude subagents: `story-architect`, `react-code-reviewer`
+- Claude CLI configured with `.claude/settings.json`
+- `jq` JSON processor (`brew install jq` / `sudo apt-get install jq`)
+- Git repository for target project
 
-## Development Commands
+## Quick Start
 
-- Make the script executable: `chmod +x multi-run.sh`
-- Run multi-runner tasks: `./multi-run.sh my-config.json`
-- Run single runner: `./multi-run.sh single-runner-config.json`
-- Run test configuration: `./test-multi.sh`
-- Edit configuration: Modify JSON config files
-- View logs: `tail -f design/log.log` or `tail -f design/runner-name-log.log`
-- Check errors: `cat design/error.log`
+```bash
+# Make executable
+chmod +x multi-run.sh
 
-## Architecture
+# Run with config
+./multi-run.sh configs/my-config.json
 
-### Core Components
+# View logs  
+tail -f logs/runner-name-log.log
+```
 
-1. **multi-run.sh**: Self-contained orchestration script with integrated Claude execution
-2. **Configuration files**: JSON files defining tasks, runners, and prompts
-3. **design/**: Output directory for logs, stories, research, and state files
-4. **Git worktrees**: Isolated working directories for each runner
+## Configuration Structure
 
-### Configuration Structure
-
-The JSON config supports:
-
-- **Task object**: Single `task` object containing task definition and shared prompts
-- **Runners array**: Array of `runners` with individual configurations at root level  
-- **Global settings**: `max_loops`, `git_project_path`, `git_base_branch` at root level
-- **Task-level prompts**: `initial_prompts`, `loop_prompts`, `exit_conditions`, `end_prompts` shared across runners
-- **Runner-specific config**: `prompt_modifications` and `extra_prompts` for customization
-- **Exit conditions**: File-based conditions with `name` and `file` properties
-- **Prompt properties**: `name`, `prompt`, optional `period` for loop prompts, optional `skip_condition` for initial prompts
-
-### Prompt Execution Flow
-
-1. Initial prompts run sequentially (unless skipped)
-2. Main loop executes, running prompts based on their period
-3. Exit conditions checked after each prompt
-4. End prompts run before final exit
-
-### State Management
-
-- Uses file-based state tracking (`design/TASKS_DONE`, `design/GAME_DONE`, etc.)
-- Configurable retry logic with rate limit handling
-- Comprehensive logging to `design/log.log`
-
-## Multi-Runner System
-
-The project now supports running multiple Claude instances on the same task to compare different approaches.
-
-### Multi-Runner Commands
-
-- Run multi-runner tasks: `./multi-run.sh multi-runner-config.json`
-- Test multi-runner system: `./test-multi.sh`
-- Cleanup worktrees and branches: `./cleanup-worktrees.sh`
-
-### Multi-Runner Architecture
-
-Each runner gets its own:
-- **Git worktree**: Separate working directory
-- **Git branch**: Named `task_name/runner_name`
-- **Configuration**: Base config + runner-specific instructions
-- **Log files**: Separate logs for each runner
-- **Claude settings**: Automatic copy of `.claude/settings.json` to each worktree
-
-### Configuration Structure
-
-Multi-runner config supports inline prompt definition:
+All config files should be saved in `configs/` directory. The JSON uses a flattened structure:
 
 ```json
 {
-  "task": {
-    "name": "task_name",
-    "description": "Task description", 
-    "execution_mode": "sequential",
-    "worktree_base_path": "../worktrees",
-    
-    "initial_prompts": [
-      {
-        "name": "setup", 
-        "prompt": "Set up project",
-        "skip_condition": "[ -f package.json ]"
-      }
-    ],
-    "loop_prompts": [
-      {
-        "name": "work", 
-        "prompt": "Do work", 
-        "period": 1
-      }
-    ],
-    "exit_conditions": [
-      {
-        "name": "exit_condition", 
-        "file": "design/DONE"
-      }
-    ],
-    "end_prompts": [
-      {
-        "name": "finalize", 
-        "prompt": "Finalize"
-      }
-    ]
-  },
+  "task_name": "my_task",
+  "task_description": "Description of what this task does",
+  "git_project_path": "../my-project",
+  "git_base_branch": "main",
+  "worktree_base_path": "worktrees", 
+  "execution_mode": "sequential",
+  "max_loops": 10,
   
-  "runners": [
+  "initial_prompts": [
     {
-      "name": "security_focused",
-      "prompt_modifications": {
-        "append_to_all": " Focus on security best practices.",
-        "append_to_initial": " Establish secure foundations.",
-        "append_to_loop": " Check for vulnerabilities.", 
-        "append_to_final": " Perform security review."
-      },
-      "extra_prompts": {
-        "initial_prompts": [{"name": "security_scan", "prompt": "Scan for issues"}],
-        "loop_prompts": [{"name": "audit", "prompt": "Audit code", "period": 3}],
-        "end_prompts": [{"name": "security_report", "prompt": "Create report"}]
-      }
+      "name": "setup",
+      "prompt": "Initialize the project",
+      "skip_condition": "[ -f package.json ]"
+    }
+  ],
+  "loop_prompts": [
+    {
+      "name": "develop",
+      "prompt": "Continue development",
+      "period": 1
+    }
+  ],
+  "exit_conditions": [
+    {
+      "name": "done", 
+      "file": "design/COMPLETE"
+    }
+  ],
+  "end_prompts": [
+    {
+      "name": "finalize",
+      "prompt": "Clean up and summarize"
     }
   ],
   
-  "git_project_path": "../my-project",
-  "git_base_branch": "main", 
-  "max_loops": 10
+  "runners": [
+    {
+      "name": "main_approach",
+      "prompt_modifications": {
+        "append_to_all": " Focus on maintainability."
+      }
+    }
+  ]
 }
 ```
 
-**Key Features:**
-- **Task-level prompts**: `initial_prompts`, `loop_prompts`, `exit_conditions`, `end_prompts` defined in `task` object and shared across all runners
-- **Runner-specific extras**: `extra_prompts` for runner-specific additional prompts  
-- **Prompt modifications**: 4 different append options (`append_to_all`, `append_to_initial`, `append_to_loop`, `append_to_final`)
-- **Merge behavior**: Task-level prompts + runner extra prompts + append modifications combined
-- **Task definition**: Single `task` object with name, description, execution mode, worktree path
-- **Execution modes**: `parallel` or `sequential`  
-- **Worktree management**: Custom paths via `worktree_base_path` in task object
-- **Global settings**: `max_loops`, `git_project_path`, `git_base_branch` at root level
-- **Skip conditions**: Bash conditions in `skip_condition` for initial prompts
+### Configuration Properties
 
-### Example Workflows
+**Required:**
+- `task_name`: Unique task identifier
+- `git_project_path`: Path to target git repository
+- `runners`: Array of runner configurations
 
-**Multi-Runner (Compare Approaches):**
-1. Define task in config file like `configs/test-multi-runner-initial.json`
-2. Specify runners with different approaches/focus areas in `runners` array
-3. Run `./multi-run.sh configs/test-multi-runner-initial.json` to execute all runners
-4. Compare results across different worktrees
-5. Analyze branches to see different implementation paths
+**Optional:**
+- `task_description`: Task description (default: "No description provided")
+- `git_base_branch`: Base branch for runners (default: "main") 
+- `worktree_base_path`: Worktree directory (default: "worktrees")
+- `execution_mode`: "sequential" or "parallel" (default: "sequential")
+- `max_loops`: Maximum loop iterations (default: 10)
 
-**Single-Runner (Traditional Usage):**
-1. Use config file with single runner like `configs/test-submarine-game.json`
-2. Run `./multi-run.sh configs/test-submarine-game.json` 
-3. Results appear in single worktree
+### Prompts
 
-### Branch and Directory Structure
+**Prompt Types:**
+- `initial_prompts`: Run once at start (supports `skip_condition`)
+- `loop_prompts`: Run repeatedly (supports `period` for frequency)
+- `exit_conditions`: File-based exit triggers (`name`, `file`)  
+- `end_prompts`: Run once before exit
 
-The multi-runner system supports flexible path configurations for both git projects and worktrees:
+**Runner Customization:**
+- `prompt_modifications`: Append text to prompts (`append_to_all`, `append_to_initial`, `append_to_loop`, `append_to_final`)
+- `extra_prompts`: Add runner-specific prompts
 
-**Example with relative paths:**
-```
-multiclaude/
-├── git-project/                    # Your git repository
-│   ├── main branch (original)
-│   ├── task_name/runner1_name branch
-│   └── task_name/runner2_name branch  
-├── git-project-worktrees/          # Created parallel to git project
-│   ├── task_name_runner1_name/
-│   └── task_name_runner2_name/
-├── multi-run.sh                    # Multi-runner orchestrator
-└── multi-runner-config.json        # Configuration
+## Example Configs
+
+**Single Runner:**
+```bash
+./multi-run.sh configs/single-runner-config.json
 ```
 
-**Example with absolute paths:**
-```
-/path/to/
-├── git-project/                    # Your git repository
-│   ├── main branch (original)
-│   ├── task_name/runner1_name branch
-│   └── task_name/runner2_name branch  
-├── git-project-worktrees/          # Created parallel to git project
-│   ├── task_name_runner1_name/
-│   └── task_name_runner2_name/
-└── multiclaude/                    # Script location
-    ├── multi-run.sh
-    └── multi-runner-config.json
+**Multiple Runners (Compare Approaches):**
+```bash  
+./multi-run.sh configs/multi-runner-config.json
 ```
 
-### Configuration Options
+**Parallel Execution:**
+```bash
+./multi-run.sh configs/parallel-runners-config.json
+```
 
-- **`git_project_path`**: Path to git repository - can be relative or absolute (**required parameter**)
-- **`git_base_branch`**: Base branch that all runners will branch off from as their starting point (default: `"main"`)
-- **`worktree_base_path`**: Where to create worktrees (default: `"worktrees"`)
-  - If absolute path: used as-is
-  - If relative path + git project is absolute: creates `{git_parent_dir}/{git_project_name}-{worktree_base_path}`
-  - If relative path + git project is relative: uses relative path as-is
+## Architecture
 
-**Path Examples:**
-- Git project: `/path/to/my-project`, worktree base: `"worktrees"` → `/path/to/my-project-worktrees/`
-- Git project: `./my-project`, worktree base: `"worktrees"` → `./worktrees/`
-- Git project: `/path/to/project`, worktree base: `"/custom/path"` → `/custom/path/`
+**Each runner gets:**
+- Separate git worktree and branch (`task_name/runner_name`)
+- Individual log files (`logs/runner-name-log.log`)
+- Merged configuration (shared + runner-specific prompts)
 
-### Prerequisites for Multi-Runner
+**Directory Structure:**
+```
+project/
+├── multiclaude/
+│   ├── multi-run.sh
+│   └── configs/
+├── my-project/                    # Target git repo
+│   ├── main (original)
+│   └── task_name/runner_name      # Runner branches
+└── my-project-worktrees/          # Runner worktrees  
+    └── task_name_runner_name/
+```
 
-1. Git repository at the path specified in `git_project_path` config (**required parameter**)
-2. Initial commit on base branch specified in `git_base_branch` config (default: `"main"`)
-3. Clean working directory (no uncommitted changes)
-4. Sufficient permissions to create directories at the calculated worktree paths
-5. `.claude/settings.json` file in the script directory (automatically copied to each worktree)
+## Execution Flow
+
+1. **Setup**: Create worktrees and branches for each runner
+2. **Initial**: Run initial prompts (with skip conditions)
+3. **Loop**: Execute loop prompts based on period until max_loops or exit condition
+4. **Exit**: Run end prompts and cleanup
+5. **Commit**: Auto-commit all changes with descriptive messages
+
+## Advanced Features
+
+- **Skip conditions**: Bash conditions for initial prompts
+- **Period-based execution**: Loop prompts run every N iterations
+- **Rate limit handling**: Automatic retry with backoff
+- **Parallel/sequential modes**: Run runners simultaneously or one-by-one
+- **Flexible paths**: Relative/absolute paths for projects and worktrees
+- **Auto-commit**: Changes committed with context-rich messages

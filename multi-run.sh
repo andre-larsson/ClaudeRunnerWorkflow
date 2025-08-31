@@ -252,15 +252,15 @@ create_inline_runner_config() {
         },
         max_loops: (.max_loops // 10),
         initial_prompts:
-          ( safe_prompts(.task.initial_prompts; $append_to_initial)
+          ( safe_prompts(.initial_prompts; $append_to_initial)
             + (.runners[$runner_index|tonumber].extra_prompts.initial_prompts // []) ),
         loop_prompts:
-          ( safe_prompts(.task.loop_prompts; $append_to_loop)
+          ( safe_prompts(.loop_prompts; $append_to_loop)
             + (.runners[$runner_index|tonumber].extra_prompts.loop_prompts // []) ),
         exit_conditions:
-          ( (.task.exit_conditions // []) + (.runners[$runner_index|tonumber].extra_prompts.exit_conditions // []) ),
+          ( (.exit_conditions // []) + (.runners[$runner_index|tonumber].extra_prompts.exit_conditions // []) ),
         end_prompts:
-          ( safe_prompts(.task.end_prompts; $append_to_final)
+          ( safe_prompts(.end_prompts; $append_to_final)
             + (.runners[$runner_index|tonumber].extra_prompts.end_prompts // []) )
       }
       ' "$MULTI_CONFIG_FILE" > "$runner_config_path" || {
@@ -542,11 +542,11 @@ run_task_runner() {
 
 # Run task with multiple runners
 run_task() {
-    local task_name=$(jq -r ".task.name // \"untitled_task\"" "$MULTI_CONFIG_FILE")
-    local description=$(jq -r ".task.description // \"No description provided\"" "$MULTI_CONFIG_FILE")
+    local task_name=$(jq -r ".task_name // \"untitled_task\"" "$MULTI_CONFIG_FILE")
+    local description=$(jq -r ".task_description // \"No description provided\"" "$MULTI_CONFIG_FILE")
     local runner_count=$(jq -r "(.runners // []) | length" "$MULTI_CONFIG_FILE")
-    local execution_mode=$(jq -r ".task.execution_mode // \"sequential\"" "$MULTI_CONFIG_FILE")
-    local worktree_base_path_config=$(jq -r ".task.worktree_base_path // \"worktrees\"" "$MULTI_CONFIG_FILE")
+    local execution_mode=$(jq -r ".execution_mode // \"sequential\"" "$MULTI_CONFIG_FILE")
+    local worktree_base_path_config=$(jq -r ".worktree_base_path // \"worktrees\"" "$MULTI_CONFIG_FILE")
     local git_project_path=$(jq -r '.git_project_path // empty' "$MULTI_CONFIG_FILE")
     local timeout=3600
     
@@ -661,9 +661,9 @@ main() {
         exit 1
     fi
     
-    # Check if task exists
-    if ! jq -e '.task' "$MULTI_CONFIG_FILE" >/dev/null 2>&1; then
-        echo "No task found in configuration"
+    # Check if task_name exists
+    if ! jq -e '.task_name' "$MULTI_CONFIG_FILE" >/dev/null 2>&1; then
+        echo "No task_name found in configuration"
         exit 1
     fi
     

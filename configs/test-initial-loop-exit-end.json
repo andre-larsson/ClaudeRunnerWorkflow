@@ -1,4 +1,11 @@
 {
+  "task_name": "test_initial_loop_exit_end",
+  "task_description": "Test initial, loop, exit, end",
+  "git_project_path": "../git-project",
+  "git_base_branch": "main",
+  "worktree_base_path": "../tilee",
+  "execution_mode": "sequential",
+  "max_loops": 1,
   "log_file": "design/test-log.log",
   "error_file": "design/test-error.log",
   "initial_prompts": [

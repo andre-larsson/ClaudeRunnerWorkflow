@@ -1,18 +1,18 @@
 {
-  "task": {
-    "name": "simple_test",
-    "description": "Simple test: each runner creates one file and exits",
-    "execution_mode": "sequential",
-    "worktree_base_path": "../worktrees",
-    
-    "initial_prompts": [
-      {
-        "name": "create_test_file",
-        "prompt": "Create a file called 'logs/test-result.txt' with your runner name and current timestamp. Then exit."
-      }
-    ]
-  },
-  
+  "task_name": "test_multi_runner_initial",
+  "task_description": "Test the multi-runner initial prompt",
+  "git_project_path": "../git-project",
+  "git_base_branch": "main",
+  "worktree_base_path": "../tilee",
+  "execution_mode": "sequential",
+  "max_loops": 1,
+  "initial_prompts": [
+    {
+      "name": "create_test_file",
+      "prompt": "Create a file called 'logs/test-result.txt' with your runner name and current timestamp. Then exit."
+    }
+  ],
+
   "runners": [
     {
       "name": "alpha",
@@ -26,8 +26,5 @@
         "append_to_all": " You are the BETA runner."
       }
     }
-  ],
-  "git_project_path": "../git-project",
-  "git_base_branch": "main",
-  "max_loops": 10
+  ]
 }

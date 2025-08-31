@@ -1,0 +1,20 @@
+{
+  "task_name": "basic_test",
+  "task_description": "Basic test configuration",
+  "git_project_path": "./test-project",
+  "git_base_branch": "main",
+  "worktree_base_path": "worktrees",
+  "execution_mode": "sequential",
+  "max_loops": 10,
+  
+  "initial_prompts": [],
+  "loop_prompts": [],
+  "exit_conditions": [],
+  "end_prompts": [],
+  
+  "runners": [
+    {
+      "name": "test_runner"
+    }
+  ]
+}

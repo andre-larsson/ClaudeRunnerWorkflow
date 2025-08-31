@@ -1,0 +1,6 @@
+{
+  "task": {
+  },
+  "git_project_path": "../git-project",
+  "runners": [{"name": "test"}]
+}
