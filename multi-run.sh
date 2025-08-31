@@ -61,6 +61,78 @@ interruptible_sleep() {
     done
 }
 
+# Validate paths to prevent nested git repositories
+validate_paths() {
+    local git_project_path="$1"
+    local worktree_base_path_config=$(jq -r ".worktree_base_path // \"worktrees\"" "$MULTI_CONFIG_FILE")
+    
+    # Get absolute path of the script directory (multiclaude directory)
+    local script_abs_path="$(realpath "$SCRIPT_DIR")"
+    
+    # Resolve git_project_path to absolute path using cd method for relative paths
+    local git_project_abs_path
+    if [[ "$git_project_path" = /* ]]; then
+        # Already absolute
+        git_project_abs_path="$git_project_path"
+    else
+        # Relative path - resolve properly using cd
+        git_project_abs_path="$(cd "$SCRIPT_DIR" && realpath -m "$git_project_path")"
+    fi
+    
+    # Calculate worktree base path (same logic as in run_task function)
+    local worktree_base_path
+    if [[ "$worktree_base_path_config" = /* ]]; then
+        worktree_base_path="$worktree_base_path_config"
+    else
+        if [[ "$git_project_path" = /* ]]; then
+            local git_parent_dir="$(dirname "$git_project_abs_path")"
+            local git_project_name="$(basename "$git_project_abs_path")"
+            worktree_base_path="${git_parent_dir}/${git_project_name}-${worktree_base_path_config}"
+        else
+            worktree_base_path="$(cd "$SCRIPT_DIR" && pwd)/$worktree_base_path_config"
+        fi
+    fi
+    
+    # Resolve worktree path to absolute path
+    local worktree_abs_path
+    if [[ "$worktree_base_path" = /* ]]; then
+        # Already absolute
+        worktree_abs_path="$(realpath -m "$worktree_base_path")"
+    else
+        # Relative path - resolve from script directory
+        worktree_abs_path="$(cd "$SCRIPT_DIR" && realpath -m "$worktree_base_path")"
+    fi
+    
+    # Check if git_project_path is inside script directory
+    case "$git_project_abs_path/" in
+        "$script_abs_path"/*)
+            echo "ERROR: git_project_path cannot be inside the multiclaude directory"
+            echo "git_project_path: $git_project_abs_path"
+            echo "multiclaude directory: $script_abs_path" 
+            echo "This would create nested git repositories and cause conflicts."
+            echo "Please use a path outside the multiclaude directory (e.g., '../my-project')"
+            exit 1
+            ;;
+    esac
+    
+    # Check if worktree_base_path is inside script directory
+    case "$worktree_abs_path/" in
+        "$script_abs_path"/*)
+            echo "ERROR: worktree_base_path cannot be inside the multiclaude directory"
+            echo "worktree_base_path: $worktree_abs_path"
+            echo "multiclaude directory: $script_abs_path"
+            echo "This would create git worktrees inside the multiclaude git repository."
+            echo "Please use a path outside the multiclaude directory (e.g., '../worktrees')"
+            exit 1
+            ;;
+    esac
+    
+    echo "✓ Path validation passed"
+    echo "  Git project: $git_project_abs_path"
+    echo "  Worktrees: $worktree_abs_path"
+    echo "  Multiclaude: $script_abs_path"
+}
+
 # Check dependencies
 check_dependencies() {
     local missing_deps=()
@@ -83,6 +155,9 @@ check_dependencies() {
         echo "Please specify the path to your git project in the config file."
         exit 1
     fi
+    
+    # Validate paths to prevent nested git repositories
+    validate_paths "$git_project_path"
     
     # Get git base branch from config
     local git_base_branch=$(jq -r '.git_base_branch // "main"' "$MULTI_CONFIG_FILE")
@@ -580,7 +655,7 @@ run_task() {
             # Git project is absolute, create worktrees parallel to it
             local git_parent_dir="$(dirname "$git_project_path")"
             local git_project_name="$(basename "$git_project_path")"
-            worktree_base_path="${git_parent_dir}/${git_project_name}-${worktree_base_path_config}"
+            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
         else
             # Git project is relative, use relative worktree path
             worktree_base_path="$worktree_base_path_config"
