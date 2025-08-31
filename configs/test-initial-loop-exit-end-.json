@@ -1,0 +1,35 @@
+{
+  "log_file": "design/test-log.log",
+  "error_file": "design/test-error.log",
+  "initial_prompts": [
+    {
+      "name": "create_initial_file",
+      "prompt": "Create a file called 'design/initial-test.txt' with content 'Initial prompt executed successfully at $(date)'. Then exit."
+    }
+  ],
+  "loop_prompts": [
+    {
+      "name": "create_loop_file",
+      "prompt": "Create a file called 'design/loop-test.txt' with content 'Loop prompt executed at $(date)'. Then create an empty file called 'design/TEST_DONE' to signal completion.",
+      "period": 1
+    }
+  ],
+  "exit_conditions": [
+    {
+      "file": "design/TEST_DONE",
+      "action": "exit",
+      "message": "Test completed successfully!"
+    }
+  ],
+  "end_prompts": [
+    {
+      "name": "create_final_file",
+      "prompt": "Create a file called 'design/final-test.txt' with content 'End prompt executed successfully at $(date). Test completed.'"
+    }
+  ],
+  "runners": [
+    {
+      "name": "runner"
+    }
+  ]
+}

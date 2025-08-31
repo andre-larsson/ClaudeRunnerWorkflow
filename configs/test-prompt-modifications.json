@@ -1,0 +1,83 @@
+{
+  "max_loops": 1,
+  "multi_runner_tasks": [
+    {
+      "name": "comprehensive_demo",
+      "description": "Demonstrate all prompt modification features",
+      "runner_count": 2,
+      "execution_mode": "sequential",
+      
+      "common_prompts": {
+        "initial_prompts": [
+          {
+            "name": "common_setup",
+            "prompt": "Create a file called initial.txt."
+          }
+        ]
+      },
+
+      "loop_prompts": [
+        {
+          "name": "common_work",
+          "prompt": "Create a file called loop.txt."
+        }
+      ],
+      
+      "exit_conditions": [
+        {
+          "name": "exit_condition",
+          "file": "loop.txt"
+        }
+      ],
+      "end_prompts": [
+        {
+          "name": "common_finalize",
+          "prompt": "Create a file called final.txt."
+        }
+      ],
+      "runners": [
+        {
+          "name": "fully_customized",
+          "prompt_modifications": {
+            "append_to_all": " Create a file called append_to_all.txt.",
+            "append_to_initial": " Create a file called append_to_initial.txt.",
+            "append_to_loop": " Create a file called append_to_loop.txt.",
+            "append_to_final": " Create a file called append_to_final.txt."
+          },
+          "extra_prompts": {
+            "initial_prompts": [
+              {
+                "name": "extra_analysis",
+                "prompt": "Perform detailed analysis before starting"
+              }
+            ],
+            "loop_prompts": [
+              {
+                "name": "extra_validation",
+                "prompt": "Validate your work thoroughly",
+                "period": 2
+              }
+            ],
+            "end_prompts": [
+              {
+                "name": "extra_documentation",
+                "prompt": "Create comprehensive documentation"
+              }
+            ]
+          }
+        },
+        {
+          "name": "minimal_runner",
+          "prompt_modifications": {
+            "append_to_all": " You are the minimal runner.",
+            "append_to_loop": " Keep it simple."
+          }
+        }
+      ],
+      
+      "worktree_base_path": "../worktrees"
+    }
+  ],  
+  "git_project_path": "../git-project",
+  "git_base_branch": "main"
+}

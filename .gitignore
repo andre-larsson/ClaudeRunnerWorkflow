@@ -1,0 +1,79 @@
+# Logs and output files
+design/
+logs/
+*.log
+
+# Generated runner configs
+*-config.json
+!test-*.json
+!*-test-config.json
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Git worktrees (typically created outside this repo)
+worktrees/
+*-worktrees/
+
+# State files
+TASKS_DONE
+GAME_DONE
+DONE
+*.state
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node.js (if any configs use npm)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (if any helper scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# Local configuration overrides
+local-*.json
+.env
+.env.local
+
+# Test results and coverage
+test-results/
+coverage/
+
+# Lock files for dependencies
+package-lock.json
+yarn.lock
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock

@@ -1,0 +1,88 @@
+{
+  "task": {
+    "name": "single_task",
+    "description": "Single runner",
+    "execution_mode": "sequential",
+    "worktree_base_path": "../worktrees",
+    
+    "initial_prompts": [
+      {
+        "name": "design_document",
+        "prompt": "Create and think about a brief design document CLAUDE.md for story-driven submarine management crew game with horror elements written using React and Node.js. It is a single player, but think about how to deploy on platforms such as itch.io. Include section on gameplay mechanics and interactions. Include section on story and lore.",
+        "skip_condition": "[ -f package.json ] && [ -d .git ]"
+      },
+      {
+        "name": "git_setup", 
+        "prompt": "Initialize a new git project in this folder. Create a .gitignore file for node.js and react. Add to CLAUDE.md: commit changes but do not push, include links to story and research files @design/story.md and @design/research.md. Add to CLAUDE.md: if there are any critical claude errors preventing us from developing the game such as missing permissions, append these to design/error.log",
+        "skip_condition": "[ -f package.json ] && [ -d .git ]"
+      },
+      {
+        "name": "react_skeleton",
+        "prompt": "Initialize a skeleton React project. Add a TODO list in CLAUDE.md with the most important task to be done next.",
+        "skip_condition": "[ -f package.json ] && [ -d .git ]"
+      },
+      {
+        "name": "setup_testing",
+        "prompt": "Set up basic testing, and install dependencies with npm. Test the skeleton code and fix any issues.",
+        "skip_condition": "[ -f package.json ] && [ -d .git ]"
+      },
+      {
+        "name": "screenshot_setup",
+        "prompt": "Make sure it is possible to programmatically run the app, take a screenshot to design/screenshot_<date>.png, and exit. Add a npm script to do this, and add instructions to CLAUDE.md to take a screenshot before each commit.",
+        "skip_condition": "[ -f package.json ] && [ -d .git ]"
+      }
+    ],
+    "loop_prompts": [
+      {
+        "name": "do_next_task",
+        "prompt": "Find the most important task to be done next in CLAUDE.md and do it. Add simple test cases for the new code.",
+        "period": 1
+      },
+      {
+        "name": "story_review",
+        "prompt": "Review and think about the game story using the story-architect, create or update a design/story.md with key lore and events. Keep it simple but interesting. Add story elements to game where appropriate. Consider the beginning and ending, and how to present it to the player, create draft if needed. Any game mechanics should be explained to the user in a natural way. Research key concepts to enrich the story with technical details, save your findings in design/research.md.",
+        "period": 1
+      },
+      {
+        "name": "review_previous_task",
+        "prompt": "Check git log and review the last commit, think about whether there could be any layout issues - inconsistent styling, overlapping elements, rounding issues etc. and fix them. Update CLAUDE.md including its TODO list with the most important task to be done next. If all tasks are done and the game runs without errors, create empty file design/TASKS_DONE. If there are any errors preventing further development, write them to design/error.log",
+        "period": 1
+      },
+      {
+        "name": "periodic_review",
+        "prompt": "Assume you are game tester who value creativity, meaningful interactions and impactful player agency, part of a focus group evaluating the game. Pretend you are playing the game and think about what comments and critiques you would have, having a gamer's perspective. With these insights in mind, update CLAUDE.md with the most important task to be done next.",
+        "period": 3
+      }
+    ],
+    "exit_conditions": [
+      {
+        "name": "error_detected",
+        "file": "design/error.log"
+      },
+      {
+        "name": "tasks_completed",
+        "file": "design/TASKS_DONE"
+      },
+      {
+        "name": "game_done",
+        "file": "design/GAME_DONE"
+      }
+    ],
+    "end_prompts": [
+      {
+        "name": "final_review",
+        "prompt": "Assume you are game tester who value creativity, meaningful interactions and impactful player agency, part of a focus group evaluating the game. Pretend you are playing the game and think about what comments and critiques you would have, having a gamer's perspective. With these insights in mind, update CLAUDE.md with the most important task to be done next. Add a simple README.md file to the project with instructions on how to run the app."
+      }
+    ]
+  },
+  
+  "runners": [
+    {
+      "name": "main"
+    }
+  ],
+  
+  "git_project_path": "../git-project",
+  "git_base_branch": "main",
+  "max_loops": 1
+}

@@ -35,11 +35,13 @@ This project is a JSON-configurable bash script for orchestrating Claude CLI com
 
 The JSON config supports:
 
-- **initial_prompts**: Run once at startup, can have skip conditions
-- **loop_prompts**: Run in main loop with configurable periodicity
-- **exit_conditions**: File-based conditions that trigger actions or exit
-- **end_prompts**: Run before final exit, can have conditions
-- **config**: Global settings (retry attempts, delays, file paths)
+- **Task object**: Single `task` object containing task definition and shared prompts
+- **Runners array**: Array of `runners` with individual configurations at root level  
+- **Global settings**: `max_loops`, `git_project_path`, `git_base_branch` at root level
+- **Task-level prompts**: `initial_prompts`, `loop_prompts`, `exit_conditions`, `end_prompts` shared across runners
+- **Runner-specific config**: `prompt_modifications` and `extra_prompts` for customization
+- **Exit conditions**: File-based conditions with `name` and `file` properties
+- **Prompt properties**: `name`, `prompt`, optional `period` for loop prompts, optional `skip_condition` for initial prompts
 
 ### Prompt Execution Flow
 
@@ -79,18 +81,42 @@ Multi-runner config supports inline prompt definition:
 
 ```json
 {
-  "multi_runner_tasks": [{
+  "task": {
     "name": "task_name",
-    "description": "Task description",
-    "runner_count": 2,
-    "execution_mode": "parallel",
-    "common_prompts": {
-      "initial_prompts": [{"name": "setup", "prompt": "Set up project"}],
-      "loop_prompts": [{"name": "work", "prompt": "Do work", "period": 1}],
-      "exit_conditions": [{"file": "design/DONE", "action": "exit"}],
-      "end_prompts": [{"name": "finalize", "prompt": "Finalize"}]
-    },
-    "runners": [{
+    "description": "Task description", 
+    "execution_mode": "sequential",
+    "worktree_base_path": "../worktrees",
+    
+    "initial_prompts": [
+      {
+        "name": "setup", 
+        "prompt": "Set up project",
+        "skip_condition": "[ -f package.json ]"
+      }
+    ],
+    "loop_prompts": [
+      {
+        "name": "work", 
+        "prompt": "Do work", 
+        "period": 1
+      }
+    ],
+    "exit_conditions": [
+      {
+        "name": "exit_condition", 
+        "file": "design/DONE"
+      }
+    ],
+    "end_prompts": [
+      {
+        "name": "finalize", 
+        "prompt": "Finalize"
+      }
+    ]
+  },
+  
+  "runners": [
+    {
       "name": "security_focused",
       "prompt_modifications": {
         "append_to_all": " Focus on security best practices.",
@@ -103,32 +129,38 @@ Multi-runner config supports inline prompt definition:
         "loop_prompts": [{"name": "audit", "prompt": "Audit code", "period": 3}],
         "end_prompts": [{"name": "security_report", "prompt": "Create report"}]
       }
-    }]
-  }]
+    }
+  ],
+  
+  "git_project_path": "../my-project",
+  "git_base_branch": "main", 
+  "max_loops": 10
 }
 ```
 
 **Key Features:**
-- **Common prompts**: Shared across all runners
-- **Extra prompts**: Runner-specific additional prompts  
-- **Append modifications**: 4 different append options
-- **Merge behavior**: Common + extra prompts combined
-- **Task definition**: Name, description, runner count
+- **Task-level prompts**: `initial_prompts`, `loop_prompts`, `exit_conditions`, `end_prompts` defined in `task` object and shared across all runners
+- **Runner-specific extras**: `extra_prompts` for runner-specific additional prompts  
+- **Prompt modifications**: 4 different append options (`append_to_all`, `append_to_initial`, `append_to_loop`, `append_to_final`)
+- **Merge behavior**: Task-level prompts + runner extra prompts + append modifications combined
+- **Task definition**: Single `task` object with name, description, execution mode, worktree path
 - **Execution modes**: `parallel` or `sequential`  
-- **Worktree management**: Custom paths and cleanup options
+- **Worktree management**: Custom paths via `worktree_base_path` in task object
+- **Global settings**: `max_loops`, `git_project_path`, `git_base_branch` at root level
+- **Skip conditions**: Bash conditions in `skip_condition` for initial prompts
 
 ### Example Workflows
 
 **Multi-Runner (Compare Approaches):**
-1. Define task in `multi-runner-config.json`
-2. Specify runners with different approaches/focus areas
-3. Run `./multi-run.sh multi-runner-config.json` to execute all runners
+1. Define task in config file like `configs/test-multi-runner-initial.json`
+2. Specify runners with different approaches/focus areas in `runners` array
+3. Run `./multi-run.sh configs/test-multi-runner-initial.json` to execute all runners
 4. Compare results across different worktrees
 5. Analyze branches to see different implementation paths
 
 **Single-Runner (Traditional Usage):**
-1. Use `single-runner-config.json` for one runner
-2. Run `./multi-run.sh single-runner-config.json` 
+1. Use config file with single runner like `configs/test-submarine-game.json`
+2. Run `./multi-run.sh configs/test-submarine-game.json` 
 3. Results appear in single worktree
 
 ### Branch and Directory Structure
@@ -166,7 +198,7 @@ multiclaude/
 
 ### Configuration Options
 
-- **`git_project_path`**: Path to git repository - can be relative or absolute (default: `"./git-project"`)
+- **`git_project_path`**: Path to git repository - can be relative or absolute (**required parameter**)
 - **`git_base_branch`**: Base branch that all runners will branch off from as their starting point (default: `"main"`)
 - **`worktree_base_path`**: Where to create worktrees (default: `"worktrees"`)
   - If absolute path: used as-is
@@ -175,12 +207,12 @@ multiclaude/
 
 **Path Examples:**
 - Git project: `/path/to/my-project`, worktree base: `"worktrees"` → `/path/to/my-project-worktrees/`
-- Git project: `./git-project`, worktree base: `"worktrees"` → `./worktrees/`
+- Git project: `./my-project`, worktree base: `"worktrees"` → `./worktrees/`
 - Git project: `/path/to/project`, worktree base: `"/custom/path"` → `/custom/path/`
 
 ### Prerequisites for Multi-Runner
 
-1. Git repository at the path specified in `git_project_path` config (default: `"./git-project"`)
+1. Git repository at the path specified in `git_project_path` config (**required parameter**)
 2. Initial commit on base branch specified in `git_base_branch` config (default: `"main"`)
 3. Clean working directory (no uncommitted changes)
 4. Sufficient permissions to create directories at the calculated worktree paths
