@@ -1,0 +1,30 @@
+{
+  "task_name": "test_multi_runner_initial",
+  "task_description": "Test the multi-runner initial prompt",
+  "git_project_path": "../git-project",
+  "git_base_branch": "main",
+  "worktree_base_path": "../worktrees",
+  "execution_mode": "parallel",
+  "max_loops": 1,
+  "initial_prompts": [
+    {
+      "name": "create_test_file",
+      "prompt": "Create a file called 'logs/test-result.txt' with your runner name and current timestamp. Then exit."
+    }
+  ],
+
+  "runners": [
+    {
+      "name": "alpha",
+      "prompt_modifications": {
+        "append_to_all": " You are the ALPHA runner."
+      }
+    },
+    {
+      "name": "beta",
+      "prompt_modifications": {
+        "append_to_all": " You are the BETA runner."
+      }
+    }
+  ]
+}

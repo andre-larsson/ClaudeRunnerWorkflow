@@ -3,8 +3,29 @@
 # Multi-runner script for running multiple Claude instances on the same task
 # Each runner gets its own git worktree and branch
 
-MULTI_CONFIG_FILE="${1:-multi-runner-config.json}"
+# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load libraries
+source "$SCRIPT_DIR/lib/logging.sh"
+source "$SCRIPT_DIR/lib/config.sh"
+source "$SCRIPT_DIR/lib/path-utils.sh"
+source "$SCRIPT_DIR/lib/git-ops.sh"
+source "$SCRIPT_DIR/lib/runner-exec.sh"
+
+# Configuration file
+MULTI_CONFIG_FILE="${1:-multi-runner-config.json}"
+
+# Handle relative config paths
+if [[ ! "$MULTI_CONFIG_FILE" = /* ]]; then
+    # If file exists in current directory, use it
+    if [ -f "$MULTI_CONFIG_FILE" ]; then
+        MULTI_CONFIG_FILE="$(pwd)/$MULTI_CONFIG_FILE"
+    # Otherwise check if it's in the script directory
+    elif [ -f "$SCRIPT_DIR/$MULTI_CONFIG_FILE" ]; then
+        MULTI_CONFIG_FILE="$SCRIPT_DIR/$MULTI_CONFIG_FILE"
+    fi
+fi
 
 # Global variables for signal handling
 BACKGROUND_PIDS=()
@@ -17,15 +38,12 @@ cleanup_and_exit() {
     fi
     CLEANUP_DONE=true
     
-    echo ""
-    echo "========================================="
-    echo "Received interrupt signal. Cleaning up..."
-    echo "========================================="
+    print_section "Received interrupt signal. Cleaning up..."
     
     # Kill all background processes
     for pid in "${BACKGROUND_PIDS[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
-            echo "Killing background process: $pid"
+            log_info "Killing background process: $pid"
             kill -TERM "$pid" 2>/dev/null
             sleep 1
             if kill -0 "$pid" 2>/dev/null; then
@@ -39,101 +57,12 @@ cleanup_and_exit() {
         wait "$pid" 2>/dev/null || true
     done
     
-    echo "Cleanup completed. Exiting."
+    log_info "Cleanup completed. Exiting."
     exit 130
 }
 
 # Set up signal traps
 trap cleanup_and_exit SIGINT SIGTERM
-
-# Interruptible sleep function
-interruptible_sleep() {
-    local duration="$1"
-    local elapsed=0
-    
-    while [ $elapsed -lt $duration ]; do
-        sleep 1
-        elapsed=$((elapsed + 1))
-        # Check if we received a signal
-        if [ "$CLEANUP_DONE" = true ]; then
-            return 1
-        fi
-    done
-}
-
-# Validate paths to prevent nested git repositories
-validate_paths() {
-    local git_project_path="$1"
-    local worktree_base_path_config=$(jq -r ".worktree_base_path // \"worktrees\"" "$MULTI_CONFIG_FILE")
-    
-    # Get absolute path of the script directory (multiclaude directory)
-    local script_abs_path="$(realpath "$SCRIPT_DIR")"
-    
-    # Resolve git_project_path to absolute path using cd method for relative paths
-    local git_project_abs_path
-    if [[ "$git_project_path" = /* ]]; then
-        # Already absolute
-        git_project_abs_path="$git_project_path"
-    else
-        # Relative path - resolve properly using cd
-        git_project_abs_path="$(cd "$SCRIPT_DIR" && realpath -m "$git_project_path")"
-    fi
-    
-    # Calculate worktree base path (same logic as in run_task function)
-    local worktree_base_path
-    if [[ "$worktree_base_path_config" = /* ]]; then
-        worktree_base_path="$worktree_base_path_config"
-    else
-        if [[ "$git_project_path" = /* ]]; then
-            local git_parent_dir="$(dirname "$git_project_abs_path")"
-            local git_project_name="$(basename "$git_project_abs_path")"
-            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
-        else
-            # Git project is relative, create worktrees parallel to git project
-            local git_parent_dir="$(dirname "$git_project_abs_path")"
-            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
-        fi
-    fi
-    
-    # Resolve worktree path to absolute path
-    local worktree_abs_path
-    if [[ "$worktree_base_path" = /* ]]; then
-        # Already absolute
-        worktree_abs_path="$(realpath -m "$worktree_base_path")"
-    else
-        # Relative path - resolve from script directory
-        worktree_abs_path="$(cd "$SCRIPT_DIR" && realpath -m "$worktree_base_path")"
-    fi
-    
-    # Check if git_project_path is inside script directory
-    case "$git_project_abs_path/" in
-        "$script_abs_path"/*)
-            echo "ERROR: git_project_path cannot be inside the multiclaude directory"
-            echo "git_project_path: $git_project_abs_path"
-            echo "multiclaude directory: $script_abs_path" 
-            echo "This would create nested git repositories and cause conflicts."
-            echo "Please use a path outside the multiclaude directory (e.g., '../my-project')"
-            exit 1
-            ;;
-    esac
-    
-    # Check if worktree_base_path is inside script directory
-    case "$worktree_abs_path/" in
-        "$script_abs_path"/*)
-            echo "ERROR: worktree_base_path cannot be inside the multiclaude directory"
-            echo "worktree_base_path: $worktree_abs_path"
-            echo "multiclaude directory: $script_abs_path"
-            echo "This would create git worktrees inside the multiclaude git repository."
-            echo "Please use a path outside the multiclaude directory (e.g., '../worktrees')"
-            exit 1
-            ;;
-    esac
-    
-    echo "✓ Path validation passed"
-    echo "  Git project: $git_project_abs_path"
-    echo "  Worktrees: $worktree_abs_path"
-    echo "  Multiclaude: $script_abs_path"
-}
 
 # Check dependencies
 check_dependencies() {
@@ -143,701 +72,254 @@ check_dependencies() {
     command -v git >/dev/null 2>&1 || missing_deps+=("git")
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
-        echo "ERROR: Missing required dependencies: ${missing_deps[*]}"
-        echo "Please install missing dependencies and try again."
+        log_error "Missing required dependencies: ${missing_deps[*]}"
+        log_error "Please install missing dependencies and try again."
         exit 1
     fi
     
-    # Get git project path from config (required parameter)
-    local git_project_path=$(jq -r '.git_project_path // empty' "$MULTI_CONFIG_FILE")
-    
-    # Validate that git_project_path is provided
-    if [ -z "$git_project_path" ] || [ "$git_project_path" = "null" ]; then
-        echo "ERROR: git_project_path is required in configuration file"
-        echo "Please specify the path to your git project in the config file."
-        exit 1
-    fi
-    
-    # Validate paths to prevent nested git repositories
-    validate_paths "$git_project_path"
-    
-    # Get git base branch from config
-    local git_base_branch=$(jq -r '.git_base_branch // "main"' "$MULTI_CONFIG_FILE")
-    
-    # Create git project directory if it doesn't exist
-    if [ ! -d "$git_project_path" ]; then
-        echo "Creating git project directory: $git_project_path"
-        mkdir -p "$git_project_path" || {
-            echo "ERROR: Failed to create directory: $git_project_path"
-            exit 1
-        }
-    fi
-    
-    # Initialize git repository if it doesn't exist
-    if ! (cd "$git_project_path" && git rev-parse --git-dir >/dev/null 2>&1); then
-        echo "Initializing git repository: $git_project_path"
-        (cd "$git_project_path" && git init) || {
-            echo "ERROR: Failed to initialize git repository"
-            exit 1
-        }
-    fi
-    
-    # Ensure there's at least one commit (needed for branching)
-    if ! (cd "$git_project_path" && git rev-parse HEAD >/dev/null 2>&1); then
-        echo "Creating initial commit in: $git_project_path"
-        (cd "$git_project_path" && {
-            echo "# Initial repository" > README.md
-            git add README.md
-            git commit -m "Initial commit"
-        }) || {
-            echo "ERROR: Failed to create initial commit"
-            exit 1
-        }
-    fi
-    
-    # Ensure the base branch exists and is checked out
-    (cd "$git_project_path" && {
-        local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        if [ "$current_branch" != "$git_base_branch" ]; then
-            if git show-ref --quiet refs/heads/"$git_base_branch"; then
-                echo "Checking out existing base branch: $git_base_branch"
-                git checkout "$git_base_branch"
-            else
-                echo "Creating and checking out base branch: $git_base_branch"
-                git checkout -b "$git_base_branch"
-            fi
-        fi
-    }) || {
-        echo "ERROR: Failed to ensure base branch exists: $git_base_branch"
-        exit 1
-    }
-    
-    echo "Using git project at: $git_project_path (branch: $git_base_branch)"
+    log_success "All dependencies found"
 }
 
-# Generate random ID for unnamed runners
-generate_random_id() {
-    local length=6
-    tr -dc 'a-z0-9' < /dev/urandom | head -c "$length"
-}
-
-# Create git worktree and branch for a runner
-create_runner_worktree() {
+# Prepare runner
+prepare_runner() {
     local task_name="$1"
     local runner_name="$2"
-    local worktree_path="$3"
-    local branch_name="${task_name}/${runner_name}"
-    local base_branch=$(jq -r '.git_base_branch // "main"' "$MULTI_CONFIG_FILE")
-    local git_project_path=$(jq -r '.git_project_path // empty' "$MULTI_CONFIG_FILE")
+    local runner_index="$3"
+    local worktree_base_path="$4"
+    local git_project_path="$5"
+    local base_branch="$6"
     
-    # Convert to absolute path if relative
-    if [[ ! "$git_project_path" = /* ]]; then
-        git_project_path="$(cd "$git_project_path" 2>/dev/null && pwd)" || git_project_path="$(realpath "$git_project_path")"
-    fi
+    # Get worktree path for this runner
+    local worktree_path=$(get_runner_worktree_path "$worktree_base_path" "$task_name" "$runner_name")
     
-    # Convert worktree path to absolute path if relative
-    if [[ ! "$worktree_path" = /* ]]; then
-        # Create parent directory first if it doesn't exist for realpath to work
-        local parent_dir="$(dirname "$worktree_path")"
-        mkdir -p "$parent_dir" 2>/dev/null || true
-        worktree_path="$(realpath "$worktree_path" 2>/dev/null)" || {
-            # If realpath fails, construct absolute path manually
-            worktree_path="$(pwd)/$worktree_path"
-        }
-    fi
+    # Resolve to absolute path
+    worktree_path=$(resolve_worktree_path "$worktree_path")
     
-    echo "Creating worktree for runner: $runner_name"
-    echo "  Branch: $branch_name"
-    echo "  Path: $worktree_path"
-    echo "  Git project: $git_project_path"
-    
-    # Change to git project directory for git operations
-    cd "$git_project_path" || {
-        echo "ERROR: Failed to cd into git project: $git_project_path"
-        exit 1
-    }
-
-    # Checkout base branch
-    git checkout "$base_branch" 2>/dev/null || {
-        echo "ERROR: Could not checkout base branch $base_branch"
-        exit 1
+    # Create worktree and branch
+    create_runner_worktree "$git_project_path" "$task_name" "$runner_name" "$worktree_path" "$base_branch" || {
+        log_error "Failed to create worktree for runner: $runner_name"
+        return 1
     }
     
-    # Create worktree directory and add worktree using absolute path
-    mkdir -p "$(dirname "$worktree_path")"
-
-    echo "pwd: $(pwd)"
-    
-    # Check if worktree already exists and clean up any conflicts
-    if git worktree list | grep -q "$branch_name"; then
-        echo "Warning: Worktree for branch $branch_name already exists, removing it first..."
-        COMMAND="git worktree remove --force $(git worktree list | grep "$branch_name" | awk '{print $1}')"
-        echo "COMMAND: $COMMAND"
-        $COMMAND
-    fi
-    
-    # Remove any existing directory at worktree path
-    if [ -d "$worktree_path" ]; then
-        echo "Removing existing directory at $worktree_path"
-        rm -rf "$worktree_path"
-    fi
-    
-    # Create worktree directory and add worktree
-    mkdir -p "$(dirname "$worktree_path")"
-
-    # Delete branch if it exists
-    if git show-ref --quiet refs/heads/"$branch_name"; then
-        echo "Deleting branch $branch_name"
-        git branch -D "$branch_name"
-    fi
-
-    # Create new branch as it should not exist
-    COMMAND="git worktree add $worktree_path -b $branch_name"
-    echo "COMMAND: $COMMAND"
-    $COMMAND || {
-        echo "ERROR: Failed to create worktree at $worktree_path"
-        exit 1
-    }
-    
-    # Note: Using --allowedTools flag instead of copying .claude/settings.json
-    # due to CLI parsing bug with parentheses in tool permissions
-    
-    # Switch back to original branch
-    git checkout "$base_branch" 2>/dev/null || {
-        echo "Warning: Could not switch back to base branch $base_branch"
-    }
-    
-    # Return to script directory
-    cd "$SCRIPT_DIR"
+    echo "$worktree_path"
 }
 
-# Create runner configuration by merging common prompts with runner-specific settings
-
-# Dynamic config helper function - generates runner config on-the-fly
-get_runner_config() {
-    local runner_index="$1"
-    local runner_name="$2"
-    local query="$3"
-    
-    # If no runners defined, return base config without runner-specific modifications
-    local runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
-    if [ "$runner_count" -eq 0 ]; then
-        jq -r "
-        {
-          config: {
-            retry_attempts: 5,
-            retry_delay: 3600,
-            log_file: (\"logs/\" + \"$runner_name\" + \"-log.log\"),
-            error_file: (\"logs/\" + \"$runner_name\" + \"-error.log\")
-          },
-          max_loops: (.max_loops // 10),
-          initial_prompts: (.initial_prompts // []),
-          loop_prompts: (.loop_prompts // []),
-          loop_break_condition: (.loop_break_condition // null),
-          end_prompts: (.end_prompts // [])
-        } | $query" "$MULTI_CONFIG_FILE"
-        return
-    fi
-    
-    local append_to_all
-    append_to_all=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_all // \"\"" "$MULTI_CONFIG_FILE")
-    local append_to_initial
-    append_to_initial=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_initial // \"\"" "$MULTI_CONFIG_FILE")
-    local append_to_loop
-    append_to_loop=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_loop // \"\"" "$MULTI_CONFIG_FILE")
-    local append_to_final
-    append_to_final=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_final // \"\"" "$MULTI_CONFIG_FILE")
-
-    jq -r \
-      --arg runner_index "$runner_index" \
-      --arg runner_name "$runner_name" \
-      --arg append_to_all "$append_to_all" \
-      --arg append_to_initial "$append_to_initial" \
-      --arg append_to_loop "$append_to_loop" \
-      --arg append_to_final "$append_to_final" '
-      def safe_prompts($arr; $suffix):
-        ($arr // [])
-        | map(
-            . as $p
-            | ($p.prompt // "") as $base
-            | $p + { prompt: ($base + ($append_to_all // "") + ($suffix // "")) }
-          );
-
-      {
-        config: {
-          retry_attempts: 5,
-          retry_delay: 3600,
-          log_file: ("logs/" + $runner_name + "-log.log"),
-          error_file: ("logs/" + $runner_name + "-error.log")
-        },
-        max_loops: (.max_loops // 10),
-        initial_prompts:
-          ( safe_prompts(.initial_prompts; $append_to_initial)
-            + (.runners[$runner_index|tonumber].extra_prompts.initial_prompts // []) ),
-        loop_prompts:
-          ( safe_prompts(.loop_prompts; $append_to_loop)
-            + (.runners[$runner_index|tonumber].extra_prompts.loop_prompts // []) ),
-        loop_break_condition:
-          ( .loop_break_condition // (.runners[$runner_index|tonumber].extra_prompts.loop_break_condition // null) ),
-        end_prompts:
-          ( safe_prompts(.end_prompts; $append_to_final)
-            + (.runners[$runner_index|tonumber].extra_prompts.end_prompts // []) )
-      } | '"$query"'
-      ' "$MULTI_CONFIG_FILE"
-}
-
-
-
-# Define allowed tools (without parentheses due to CLI parsing bug)
-GET_ALLOWED_TOOLS() {
-    echo "Read,Edit,Write,MultiEdit,NotebookEdit,Bash,TodoWrite,Glob,Grep,Task,WebFetch,WebSearch,ExitPlanMode,BashOutput,KillBash"
-}
-
-# Auto-commit changes after Claude execution (external git operations)
-auto_commit_changes() {
-    local runner_name="$1"
-    local iteration="$2"
-    local worktree_path="$3"
-    local runner_index="$4"
-    local claude_output="$5"
-    local prompt_type="$6"
-    local original_prompt="$7"
-    
-    # Auto-commit is always enabled
-    
-    cd "$worktree_path" || return 1
-    
-    # Check if there are any files to add, or changes to commit
-    if git status --porcelain | grep -q '^[^ ]' || ! git diff --quiet || ! git diff --cached --quiet; then
-        # There ARE changes - proceed with commit
-        git add .
-        # Use entire Claude output as commit message
-        local claude_commit_msg=""
-        if [ -n "$claude_output" ]; then
-            claude_commit_msg="$claude_output"
-        fi
-        
-        # Generate comprehensive commit message
-        local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-        local commit_msg="[$prompt_type] $runner_name: $claude_commit_msg
-
-Prompt: $original_prompt
-Runner: $runner_name
-Iteration: $iteration
-Type: $prompt_type
-Timestamp: $timestamp"
-        
-        # Commit changes with descriptive message
-        git commit -m "$commit_msg"
-        
-        echo "Auto-committed changes for $runner_name ($prompt_type): $claude_commit_msg"
-    else
-        echo "No files to add, or changes to commit for $runner_name (iteration $iteration)"
-        return 0
-    fi
-}
-
-# Clean git commands from prompts to avoid Claude failures
-clean_git_commands_from_prompt() {
-    local prompt="$1"
-    # Remove common git write commands that Claude can't execute
-    echo "$prompt" | sed 's/git add[^;]*[;]*//g' | sed 's/git commit[^;]*[;]*//g' | sed 's/git push[^;]*[;]*//g'
-}
-
-# Claude execution with retry logic and auto-commit
-run_claude_with_retry() {
-    local prompt="$1"
-    local runner_index="$2"
-    local runner_name="$3"
-    local iteration="$4"
-    local worktree_path="$5"
-    local prompt_type="$6"
-    
-    local max_attempts=5
-    local retry_delay=3600
-    local log_file=$(get_runner_config "$runner_index" "$runner_name" '.config.log_file // "logs/log.log"')
-    local allowed_tools=$(GET_ALLOWED_TOOLS)
-    local attempt=1
-    
-    while [ $attempt -le $max_attempts ]; do
-        echo "--------------------------------" >> "$log_file"
-        echo "Attempt $attempt: Running claude command..."
-        echo "Command: $prompt"
-        echo "$prompt" >> "$log_file"
-        
-        local output
-        local exit_code
-        
-        # Clean git commands from prompt and add commit message request
-        local clean_prompt=$(clean_git_commands_from_prompt "$prompt")
-        local enhanced_prompt="$clean_prompt\n\nReturn a simple string describing changes made for git commit."
-        output=$(claude --allowedTools "$allowed_tools" -p "$enhanced_prompt" 2>&1)
-        exit_code=$?
-        
-        # Auto-commit changes if command succeeded
-        if [ $exit_code -eq 0 ] && [ -n "$worktree_path" ]; then
-            auto_commit_changes "$runner_name" "$iteration" "$worktree_path" "$runner_index" "$output" "$prompt_type" "$prompt"
-        fi
-        
-        # Check if output contains "limit reached"
-        if echo "$output" | grep -q "limit reached"; then
-            echo "Limit reached detected. Waiting $retry_delay seconds before retry..."
-            interruptible_sleep "$retry_delay"
-            attempt=$((attempt + 1))
-        else
-            echo "Command completed successfully!"
-            echo "$output"
-            echo "$output" >> "$log_file"
-            return $exit_code
-        fi
-    done
-    
-    echo "Maximum attempts reached. Exiting..."
-    return 1
-}
-
-# Execute prompts from config (integrated logic from run.sh)
-execute_runner_config() {
-    local runner_index="$1"
-    local runner_name="$2"
-    local worktree_path="$3"
-    
-    echo "Executing runner config for: $runner_name (index: $runner_index)"
-    
-    # Run initial prompts
-    local initial_count=$(get_runner_config "$runner_index" "$runner_name" '(.initial_prompts // []) | length')
-    if [ "$initial_count" -eq 0 ]; then
-        echo "No initial prompts defined. Proceeding to main loop."
-    fi
-    for ((i=0; i<initial_count; i++)); do
-        local name=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].name")
-        local prompt=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].prompt")
-        local skip_condition=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].skip_condition // null")
-        
-        if [ "$skip_condition" != "null" ] && [ -n "$skip_condition" ]; then
-            if eval "$skip_condition"; then
-                echo "Skipping initial prompt '$name' due to condition: $skip_condition"
-                continue
-            fi
-        fi
-        
-        echo "Running initial prompt: $name"
-        if ! run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "initial_$i" "$worktree_path" "initial"; then
-            echo "Failed to complete initial prompt '$name'. Exiting runner."
-            return 1
-        fi
-    done
-    
-    # Special handling for npm install if package.json exists
-    if [ -f package.json ]; then
-        echo "Installing dependencies with npm."
-        npm install
-    fi
-    
-    # Main loop
-    local COUNT=0
-    local loop_count=$(get_runner_config "$runner_index" "$runner_name" '(.loop_prompts // []) | length')
-    
-    # Skip main loop if there are no loop prompts
-    if [ "$loop_count" -eq 0 ]; then
-        echo "No loop prompts defined. Skipping main loop and proceeding to end prompts."
-        run_end_prompts "$runner_index" "$runner_name" "$worktree_path"
-        return 0
-    fi
-    
-    local max_loops=$(get_runner_config "$runner_index" "$runner_name" '.max_loops // 10')
-    # Ensure max_loops is a valid integer
-    if ! [[ "$max_loops" =~ ^[0-9]+$ ]]; then
-        max_loops=10
-    fi
-    while [ $COUNT -lt $max_loops ]; do
-        echo "Iteration $COUNT"
-        
-        # Check exit condition first
-        local loop_break_condition=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition // null')
-        if [ "$loop_break_condition" != "null" ]; then
-            local file=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition.file')
-            local name=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition.name // ""')
-            
-            if [ -f "$file" ]; then
-                echo "Exit condition triggered: $name"
-                run_end_prompts "$runner_index" "$runner_name" "$worktree_path"
-                return 0
-            fi
-        fi
-        
-        # Run loop prompts based on their period
-        for ((i=0; i<loop_count; i++)); do
-            local name=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].name")
-            local prompt=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].prompt")
-            local period=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].period // 1")
-            
-            # Handle null or empty period
-            if [ "$period" = "null" ] || [ -z "$period" ] || ! [[ "$period" =~ ^[0-9]+$ ]]; then
-                period=1
-            fi
-            
-            # Check if this prompt should run on this iteration
-            if [ $((COUNT % period)) -eq 0 ]; then
-                echo "Running loop prompt: $name (period: $period)"
-                if ! run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "loop_${COUNT}_${i}" "$worktree_path" "loop"; then
-                    echo "Failed to complete loop prompt '$name'. Exiting runner."
-                    return 1
-                fi
-            fi
-        done
-        
-        COUNT=$((COUNT + 1))
-    done
-}
-
-# Run end prompts
-run_end_prompts() {
-    local runner_index="$1"
-    local runner_name="$2"
-    local worktree_path="$3"
-    
-    local end_count=$(get_runner_config "$runner_index" "$runner_name" '(.end_prompts // []) | length')
-    if [ "$end_count" -eq 0 ]; then
-        echo "No end prompts defined. Task completed."
-    fi
-    for ((i=0; i<end_count; i++)); do
-        local name=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].name")
-        local prompt=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].prompt")
-        
-        echo "Running end prompt: $name"
-        run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "end_$i" "$worktree_path" "final"
-    done
-}
-
-# Run a single task runner
+# Run single task runner
 run_task_runner() {
-    local task_name="$1"
-    local runner_name="$2"
-    local worktree_path="$3"
+    local config_file="$1"
+    local task_name="$2"
+    local runner_name="$3"
     local runner_index="$4"
-    local timeout="$5"
+    local worktree_path="$5"
+    local timeout="${6:-0}"
     
-    echo "========================================="
-    echo "Starting runner: $runner_name"
-    echo "Worktree: $worktree_path"
-    echo "Runner Index: $runner_index"
-    echo "========================================="
+    log_runner_status "$runner_name" "starting"
+    log_info "  Worktree: $worktree_path"
+    log_info "  Runner Index: $runner_index"
     
-    cd "$worktree_path" || {
-        echo "ERROR: Failed to cd into worktree: $worktree_path"
+    # Copy config file to worktree
+    cp "$config_file" "$worktree_path/" || {
+        log_error "Failed to copy config to worktree"
         return 1
     }
     
-    # Create logs directory for logs
-    mkdir -p logs || {
-        echo "ERROR: Failed to create logs directory"
-        return 1
-    }
+    local config_basename=$(basename "$config_file")
+    local start_time=$(date +%s)
     
-    # Copy the main config file to worktree so get_runner_config can access it
-    if [[ "$MULTI_CONFIG_FILE" == /* ]]; then
-        # Absolute path (temp file), use as-is
-        cp "$MULTI_CONFIG_FILE" ./ || {
-            echo "ERROR: Failed to copy main config to worktree"
-            return 1
-        }
-    else
-        # Relative path, prepend SCRIPT_DIR
-        cp "$SCRIPT_DIR/$MULTI_CONFIG_FILE" ./ || {
-            echo "ERROR: Failed to copy main config to worktree"
-            return 1
-        }
-    fi
-    
+    # Execute runner
     if [ "$timeout" -gt 0 ]; then
-        timeout "$timeout" bash -c "$(declare -f execute_runner_config run_claude_with_retry run_end_prompts auto_commit_changes clean_git_commands_from_prompt GET_ALLOWED_TOOLS get_runner_config); MULTI_CONFIG_FILE='$(basename "$MULTI_CONFIG_FILE")'; execute_runner_config '$runner_index' '$runner_name' '$worktree_path'" || {
+        timeout "$timeout" bash -c "
+            cd '$worktree_path' || exit 1
+            source '$SCRIPT_DIR/lib/logging.sh'
+            source '$SCRIPT_DIR/lib/config.sh'
+            source '$SCRIPT_DIR/lib/git-ops.sh'
+            source '$SCRIPT_DIR/lib/runner-exec.sh'
+            execute_runner '$config_basename' '$runner_index' '$runner_name' '$worktree_path'
+        " || {
             local exit_code=$?
             if [ $exit_code -eq 124 ]; then
-                echo "Runner $runner_name timed out after $timeout seconds"
+                log_runner_status "$runner_name" "timeout"
             else
-                echo "Runner $runner_name failed with exit code: $exit_code"
+                log_runner_status "$runner_name" "failed" "exit code: $exit_code"
             fi
             return $exit_code
         }
     else
-        execute_runner_config "$runner_index" "$runner_name" "$worktree_path" || {
-            echo "Runner $runner_name failed with exit code: $?"
+        (
+            cd "$worktree_path" || exit 1
+            execute_runner "$config_basename" "$runner_index" "$runner_name" "$worktree_path"
+        ) || {
+            log_runner_status "$runner_name" "failed" "exit code: $?"
             return $?
         }
     fi
     
-    echo "Runner $runner_name completed successfully"
-    cd "$SCRIPT_DIR"
+    local end_time=$(date +%s)
+    log_runner_status "$runner_name" "completed"
+    log_execution_time "$start_time" "$end_time" "Runner $runner_name execution time"
+    
+    return 0
 }
 
 # Run task with multiple runners
 run_task() {
-    local task_name=$(jq -r ".task_name // \"untitled_task\"" "$MULTI_CONFIG_FILE")
-    local description=$(jq -r ".task_description // \"No description provided\"" "$MULTI_CONFIG_FILE")
-    local runner_count=$(jq -r "(.runners // []) | length" "$MULTI_CONFIG_FILE")
-    local execution_mode=$(jq -r ".execution_mode // \"sequential\"" "$MULTI_CONFIG_FILE")
-    local worktree_base_path_config=$(jq -r ".worktree_base_path // \"worktrees\"" "$MULTI_CONFIG_FILE")
-    local git_project_path=$(jq -r '.git_project_path // empty' "$MULTI_CONFIG_FILE")
+    local config_file="$1"
+    
+    # Load configuration
+    local task_name=$(get_task_name "$config_file")
+    local description=$(get_task_description "$config_file")
+    local runner_count=$(get_runner_count "$config_file")
+    local execution_mode=$(get_execution_mode "$config_file")
+    local git_project_path=$(get_git_project_path "$config_file")
+    local git_base_branch=$(get_git_base_branch "$config_file")
+    local worktree_base_config=$(get_worktree_base_path "$config_file")
     local timeout=3600
     
-    # Calculate worktree base path based on git project location
-    local worktree_base_path
-    if [[ "$worktree_base_path_config" = /* ]]; then
-        # Absolute path provided
-        worktree_base_path="$worktree_base_path_config"
-    else
-        # Relative path - create parallel to git project
-        if [[ "$git_project_path" = /* ]]; then
-            # Git project is absolute, create worktrees parallel to it
-            local git_parent_dir="$(dirname "$git_project_path")"
-            local git_project_name="$(basename "$git_project_path")"
-            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
-        else
-            # Git project is relative, create worktrees parallel to git project
-            local git_parent_dir="$(dirname "$(realpath "$git_project_path")")"
-            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
-        fi
+    # Ensure runner_count is a valid integer
+    if [ -z "$runner_count" ] || ! [[ "$runner_count" =~ ^[0-9]+$ ]]; then
+        runner_count=0
     fi
     
-    echo "========================================="
-    echo "MULTI-RUNNER TASK: $task_name"
-    echo "Description: $description"
-    echo "Runners: $runner_count"
-    echo "Mode: $execution_mode"
-    echo "Git project: $git_project_path"
-    echo "Worktrees base: $worktree_base_path"
-    echo "========================================="
+    # Calculate worktree base path
+    local worktree_base_path=$(calculate_worktree_path "$git_project_path" "$worktree_base_config" "$SCRIPT_DIR")
     
-    # Create runners array with names and instructions
+    print_header "MULTI-RUNNER TASK: $task_name"
+    log_info "Description: $description"
+    log_info "Runners: $runner_count"
+    log_info "Mode: $execution_mode"
+    log_info "Git project: $git_project_path"
+    log_info "Worktrees base: $worktree_base_path"
+    
+    # Prepare runners
     local runners=()
-    local runner_configs=()
     
-    # Check if we have actual runners defined or need to use default
-    local actual_runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
-    
-    for ((i=0; i<runner_count; i++)); do
-        local runner_name
-        local extra_instructions
-        
-        if [ "$actual_runner_count" -eq 0 ]; then
-            # No runners defined - use default
-            runner_name="default"
-            extra_instructions=""
-        else
-            # Use defined runners
-            runner_name=$(jq -r ".runners[$i].name // empty" "$MULTI_CONFIG_FILE")
-            extra_instructions=$(jq -r ".runners[$i].extra_instructions // \"\"" "$MULTI_CONFIG_FILE")
+    # Handle case with no runners defined
+    if [ "$runner_count" -eq 0 ]; then
+        log_info "No runners defined - using default runner"
+        runner_count=1
+        runners+=("default:0")
+    else
+        # Collect runner information
+        for ((i=0; i<runner_count; i++)); do
+            local runner_name=$(get_runner_name "$config_file" "$i")
             
-            # Generate random name if not provided
+            # Generate name if not provided
             if [ -z "$runner_name" ]; then
                 runner_name="runner_$(generate_random_id)"
             fi
+            
+            runners+=("$runner_name:$i")
+        done
+    fi
+    
+    # Prepare all runners first
+    local prepared_runners=()
+    for runner_info in "${runners[@]}"; do
+        IFS=':' read -r runner_name runner_index <<< "$runner_info"
+        
+        log_info "Preparing runner: $runner_name"
+        local worktree_path=$(prepare_runner "$task_name" "$runner_name" "$runner_index" \
+                                            "$worktree_base_path" "$git_project_path" "$git_base_branch")
+        
+        if [ -z "$worktree_path" ]; then
+            log_error "Failed to prepare runner: $runner_name"
+            continue
         fi
         
-        local worktree_path="${worktree_base_path}/${task_name}_${runner_name}"
-        
-        # Convert worktree path to absolute path if relative
-        if [[ ! "$worktree_path" = /* ]]; then
-            # Create parent directory first if it doesn't exist for realpath to work
-            local parent_dir="$(dirname "$worktree_path")"
-            mkdir -p "$parent_dir" 2>/dev/null || true
-            worktree_path="$(realpath "$worktree_path" 2>/dev/null)" || {
-                # If realpath fails, construct absolute path manually
-                worktree_path="$(pwd)/$worktree_path"
-            }
-        fi
-        
-        # Create worktree and branch
-        create_runner_worktree "$task_name" "$runner_name" "$worktree_path"
-        
-        runners+=("$runner_name:$worktree_path:$i")
+        prepared_runners+=("$runner_name:$runner_index:$worktree_path")
     done
     
     # Execute runners based on execution mode
     if [ "$execution_mode" = "parallel" ]; then
-        echo "Running $runner_count runners in parallel..."
+        log_info "Running ${#prepared_runners[@]} runners in parallel..."
         local pids=()
         
-        for runner_info in "${runners[@]}"; do
-            IFS=':' read -r runner_name worktree_path runner_index <<< "$runner_info"
-            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_index" "$timeout" &
+        for runner_info in "${prepared_runners[@]}"; do
+            IFS=':' read -r runner_name runner_index worktree_path <<< "$runner_info"
+            
+            run_task_runner "$config_file" "$task_name" "$runner_name" "$runner_index" "$worktree_path" "$timeout" &
             local pid=$!
             pids+=($pid)
             BACKGROUND_PIDS+=($pid)
         done
         
-        # Wait for all runners to complete
-        echo "Waiting for all runners to complete..."
+        # Wait for all runners
+        log_info "Waiting for all runners to complete..."
         for pid in "${pids[@]}"; do
             if ! wait "$pid" 2>/dev/null; then
-                echo "Runner with PID $pid failed or was interrupted"
+                log_warn "Runner with PID $pid failed or was interrupted"
             fi
         done
         
-        # Remove completed PIDs from BACKGROUND_PIDS
+        # Clean up completed PIDs
         for completed_pid in "${pids[@]}"; do
-            BACKGROUND_PIDS=($(printf '%s\n' "${BACKGROUND_PIDS[@]}" | grep -v "^${completed_pid}$"))
+            BACKGROUND_PIDS=($(printf '%s\n' "${BACKGROUND_PIDS[@]}" | grep -v "^${completed_pid}$" || true))
         done
     else
-        echo "Running $runner_count runners sequentially..."
-        for runner_info in "${runners[@]}"; do
-            IFS=':' read -r runner_name worktree_path runner_index <<< "$runner_info"
-            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_index" "$timeout"
+        log_info "Running ${#prepared_runners[@]} runners sequentially..."
+        
+        for runner_info in "${prepared_runners[@]}"; do
+            IFS=':' read -r runner_name runner_index worktree_path <<< "$runner_info"
+            
+            run_task_runner "$config_file" "$task_name" "$runner_name" "$runner_index" "$worktree_path" "$timeout"
         done
     fi
     
-    echo "All runners completed for task: $task_name"
+    log_task_status "$task_name" "completed"
 }
 
-# Main execution
+# Main function
 main() {
-    echo "Multi-Runner Claude Script"
-    echo "=========================="
+    local start_time=$(date +%s)
     
+    print_header "Multi-Runner Claude Script"
+    
+    # Check dependencies
     check_dependencies
     
+    # Load and validate configuration
     if [ ! -f "$MULTI_CONFIG_FILE" ]; then
-        echo "ERROR: Multi-runner config file not found: $MULTI_CONFIG_FILE"
+        log_error "Configuration file not found: $MULTI_CONFIG_FILE"
         exit 1
     fi
     
-    # Check if task_name exists - generate random one if missing
-    if ! jq -e '.task_name' "$MULTI_CONFIG_FILE" >/dev/null 2>&1; then
-        echo "No task_name found - generating random task name"
-        local random_task_name="task_$(generate_random_id)"
-        # Create a temporary config with the generated task name
+    # Load config
+    MULTI_CONFIG_FILE=$(load_config "$MULTI_CONFIG_FILE") || exit 1
+    
+    # Validate configuration
+    validate_config "$MULTI_CONFIG_FILE" || exit 1
+    
+    # Validate paths
+    local git_project_path=$(get_git_project_path "$MULTI_CONFIG_FILE")
+    local worktree_base_path=$(get_worktree_base_path "$MULTI_CONFIG_FILE")
+    validate_paths "$SCRIPT_DIR" "$git_project_path" "$worktree_base_path" || exit 1
+    
+    # Setup git repository
+    local git_base_branch=$(get_git_base_branch "$MULTI_CONFIG_FILE")
+    setup_git_repository "$git_project_path" "$git_base_branch" || exit 1
+    
+    # Ensure task name exists
+    local task_name=$(ensure_task_name "$MULTI_CONFIG_FILE")
+    
+    # Create temporary config if we generated a task name
+    if [ "$task_name" != "$(get_task_name "$MULTI_CONFIG_FILE")" ]; then
         local temp_config=$(mktemp)
-        jq ". + {task_name: \"$random_task_name\"}" "$MULTI_CONFIG_FILE" > "$temp_config"
+        jq ". + {task_name: \"$task_name\"}" "$MULTI_CONFIG_FILE" > "$temp_config"
         MULTI_CONFIG_FILE="$temp_config"
-        echo "Generated task name: $random_task_name"
     fi
     
-    # Check if runners exist - now we allow zero runners with default behavior
-    local runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
-    if [ "$runner_count" -eq 0 ]; then
-        echo "No runners found - using default runner behavior"
-        # If we already have a temp config, update it, otherwise create one
-        if [[ "$MULTI_CONFIG_FILE" == /tmp/* ]]; then
-            # Already using temp config, just update it
-            local temp_config="$MULTI_CONFIG_FILE"
-            jq '. + {runners: [{name: "default"}]}' "$temp_config" > "${temp_config}.new" && mv "${temp_config}.new" "$temp_config"
-        else
-            # Create new temp config with default runner
-            local temp_config=$(mktemp)
-            jq '. + {runners: [{name: "default"}]}' "$MULTI_CONFIG_FILE" > "$temp_config"
-            MULTI_CONFIG_FILE="$temp_config"
-        fi
-        runner_count=1
-    fi
+    # Initialize logging
+    local main_log=$(init_logging "logs" "multi-run.log")
+    log_info "Logging to: $main_log"
     
-    echo "Found task with $runner_count runner(s)"
+    # Run the task
+    run_task "$MULTI_CONFIG_FILE"
     
-    run_task
+    # Calculate total execution time
+    local end_time=$(date +%s)
+    log_execution_time "$start_time" "$end_time" "Total execution time"
     
-    echo "========================================="
-    echo "Task completed with all runners!"
-    echo "========================================="
+    print_header "All runners completed successfully!"
 }
 
 # Run main function
