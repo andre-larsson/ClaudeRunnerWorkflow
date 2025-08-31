@@ -1,67 +1,86 @@
 #!/bin/bash
 
-# generate-contexts.sh - Generate CLAUDE.md context files using Claude CLI
+# generate-contexts.sh - Config-first CLAUDE.md context file generator
 
 set -e
 
 # Default values
 DEFAULT_OUTPUT_DIR="runner-contexts"
-CONTEXT_NAME=""
-OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
+CONFIG_FILE=""
 TEMPLATE_FILE=""
-PROMPTS=()
+FORCE_REGENERATE=false
+DRY_RUN=false
 
 # Colors for output (consistent with multi-simple.sh style)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 show_usage() {
     cat << EOF
-generate-contexts.sh - Generate CLAUDE.md context files using Claude CLI
+generate-contexts.sh - Config-first CLAUDE.md context file generator
 
 USAGE:
-  $(basename "$0") [OPTIONS]
-  $(basename "$0") -p "Create a security-focused context" -n "security-expert"
+  $(basename "$0") CONFIG_FILE [OPTIONS]
 
 OPTIONS:
-  -p, --prompts "prompt1" "prompt2" ...  Prompts to send to Claude for context generation (required)
-  -n, --name NAME                        Context name for directory and identification (required)
-  -d, --directory DIR                    Output base directory (default: $DEFAULT_OUTPUT_DIR)
-  -t, --template FILE                    Optional CLAUDE.md template file to provide as context to Claude
-  -h, --help                             Show this help
+  --force                     Regenerate existing contexts
+  --template FILE             Global template for all contexts
+  --dry-run                   Show what would be generated without creating files
+  -h, --help                  Show this help
+
+CONFIG FORMAT:
+{
+  "prompts": ["Task prompts for context relevance"],
+  "task_name": "optional-task-identifier",
+  "runner_contexts": [
+    "context-name",                           // String → auto-path + name-based
+    {
+      "name": "expert-type",                  // Auto-path + name-based  
+      "description": "Custom description",    // Uses description if provided
+      "claudemd_file": "custom/path.md"       // Explicit path (optional)
+    }
+  ]
+}
 
 EXAMPLES:
-  # Generate security-focused context
-  $(basename "$0") -p "Create a CLAUDE.md context for security-focused development with OWASP guidelines" -n "security-expert"
+  # Generate all missing contexts from config
+  $(basename "$0") my-task.json
   
-  # Generate performance context with custom directory
-  $(basename "$0") -p "Performance optimization expert context" -d "my-contexts" -n "performance-guru"
+  # Force regenerate all contexts
+  $(basename "$0") my-task.json --force
   
-  # Multi-prompt context generation
-  $(basename "$0") -p "You are a React expert" "Focus on modern hooks and best practices" "Prioritize accessibility" -n "react-a11y"
+  # Use global template
+  $(basename "$0") my-task.json --template base-template.md
   
-  # Using template file as reference
-  $(basename "$0") -p "Create similar context but for Vue.js" -n "vue-expert" -t "runner-contexts/react-expert/CLAUDE.md"
+  # See what would be generated
+  $(basename "$0") my-task.json --dry-run
 
 OUTPUT:
-  Creates: \$OUTPUT_DIR/\$CONTEXT_NAME/CLAUDE.md
-  Example: $DEFAULT_OUTPUT_DIR/security-expert/CLAUDE.md
+  - Generates missing CLAUDE.md files based on config
+  - Creates config_name.json.new with complete claudemd_file paths
+  - Original config remains unchanged
+  - Respects existing files unless --force used
 
 EOF
 }
 
 log_info() {
-    echo -e "${GREEN}[Generator]${NC} $1"
+    echo -e "${GREEN}[Generator]${NC} $1" >&2
 }
 
 log_warn() {
-    echo -e "${YELLOW}[Generator]${NC} $1"
+    echo -e "${YELLOW}[Generator]${NC} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}[Generator]${NC} $1"
+    echo -e "${RED}[Generator]${NC} $1" >&2
+}
+
+log_dry() {
+    echo -e "${BLUE}[DRY-RUN]${NC} $1" >&2
 }
 
 parse_arguments() {
@@ -69,40 +88,35 @@ parse_arguments() {
         show_usage
         exit 0
     fi
-
+    
+    # First argument should be config file
+    if [[ ! "$1" =~ ^- ]]; then
+        CONFIG_FILE="$1"
+        shift
+    else
+        log_error "Config file required as first argument"
+        show_usage
+        exit 1
+    fi
+    
+    # Parse remaining options
     while [[ $# -gt 0 ]]; do
         case $1 in
-            -p|--prompts)
+            --force)
+                FORCE_REGENERATE=true
                 shift
-                # Collect all prompts until next flag or end
-                while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
-                    PROMPTS+=("$1")
-                    shift
-                done
                 ;;
-            -n|--name)
+            --template)
                 if [[ -z "$2" || "$2" =~ ^- ]]; then
-                    log_error "Context name required after -n/--name"
-                    exit 1
-                fi
-                CONTEXT_NAME="$2"
-                shift 2
-                ;;
-            -d|--directory)
-                if [[ -z "$2" || "$2" =~ ^- ]]; then
-                    log_error "Directory path required after -d/--directory"
-                    exit 1
-                fi
-                OUTPUT_DIR="$2"
-                shift 2
-                ;;
-            -t|--template)
-                if [[ -z "$2" || "$2" =~ ^- ]]; then
-                    log_error "Template file path required after -t/--template"
+                    log_error "Template file path required after --template"
                     exit 1
                 fi
                 TEMPLATE_FILE="$2"
                 shift 2
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                shift
                 ;;
             -h|--help)
                 show_usage
@@ -117,29 +131,34 @@ parse_arguments() {
     done
 }
 
-validate_requirements() {
-    # Check required arguments
-    if [ ${#PROMPTS[@]} -eq 0 ]; then
-        log_error "No prompts provided. Use -p to specify prompts for context generation."
-        show_usage
-        exit 1
-    fi
-    
-    if [ -z "$CONTEXT_NAME" ]; then
-        log_error "Context name required. Use -n to specify the context name."
-        show_usage
-        exit 1
-    fi
 
-    # Validate context name (alphanumeric, hyphens, underscores)
-    if [[ ! "$CONTEXT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-        log_error "Context name must contain only letters, numbers, hyphens, and underscores"
+validate_requirements() {
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        log_error "jq not found. Please install jq for JSON processing."
         exit 1
     fi
     
     # Check if Claude CLI is available
     if ! command -v claude &> /dev/null; then
         log_error "Claude CLI not found. Please install and configure Claude CLI first."
+        exit 1
+    fi
+    
+    # Config file validation
+    if [ -z "$CONFIG_FILE" ]; then
+        log_error "Config file required"
+        show_usage
+        exit 1
+    fi
+    
+    if [ ! -f "$CONFIG_FILE" ]; then
+        log_error "Config file not found: $CONFIG_FILE"
+        exit 1
+    fi
+    
+    if [ ! -r "$CONFIG_FILE" ]; then
+        log_error "Config file not readable: $CONFIG_FILE"
         exit 1
     fi
     
@@ -153,24 +172,171 @@ validate_requirements() {
             log_error "Template file not readable: $TEMPLATE_FILE"
             exit 1
         fi
-        log_info "Using template: $TEMPLATE_FILE"
+        log_info "Using global template: $TEMPLATE_FILE"
     fi
 }
 
+generate_path() {
+    local directory="$1"
+    echo "$DEFAULT_OUTPUT_DIR/$directory/CLAUDE.md"
+}
+
+generate_name() {
+    local string="$1"
+    if [ "$DRY_RUN" = true ]; then
+        # In dry-run, just sanitize the string to a directory name
+        local directory=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+        echo "$directory"
+        return
+    fi
+    # Call Claude and clean up the response
+    local name=$(claude --permission-mode "plan" -p "Summarize the following string in three words using kebab-case, return answer only: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+    
+    # If Claude returns empty or just whitespace, fall back to sanitized original
+    if [ -z "$name" ]; then
+        name=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+    fi
+    
+    echo "$name"
+}
+
+normalize_runner_contexts() {
+    local config_file="$1"
+    
+    # Test original config file first
+    if ! jq . "$config_file" >/dev/null 2>&1; then
+        log_error "Invalid JSON in config file: $config_file"
+        return 1
+    fi
+    
+    # Check if runner_contexts exists and is an array
+    if ! jq -e '.runner_contexts | type == "array"' "$config_file" >/dev/null 2>&1; then
+        log_info "No runner_contexts found in config, nothing to generate"
+        return 0
+    fi
+    
+    local temp_config=$(mktemp)
+    local contexts_updated=false
+    
+    # Copy original config
+    cp "$config_file" "$temp_config"
+    
+    # Process each context
+    local length=$(jq '.runner_contexts | length' "$temp_config")
+    for ((i=0; i<length; i++)); do
+        # Get the type directly from the JSON structure
+        local context_type=$(jq -r ".runner_contexts[$i] | type" "$temp_config")
+        
+        # Now get the actual value
+        local context=$(jq -r ".runner_contexts[$i]" "$temp_config")
+
+        log_info "Context type: $context_type"
+        log_info "Context: $context"
+        
+        if [ "$context_type" = "string" ]; then
+            # Convert string to object with auto-path
+            local name=$(generate_name "$context")
+            log_info "Normalized string context '$context' → '$name'"
+            
+            local path=$(generate_path "$name")
+            
+            local new_context=$(jq -n \
+                --arg name "$name" \
+                --arg path "$path" \
+                '{name: $name, claudemd_file: $path}')
+            
+            # Update config
+            temp_config2=$(mktemp)
+            jq ".runner_contexts[$i] = $new_context" "$temp_config" > "$temp_config2"
+            mv "$temp_config2" "$temp_config"
+            contexts_updated=true
+            
+            
+        elif [ "$context_type" = "object" ]; then
+            # Check if object needs claudemd_file
+            local has_path=$(jq -r ".runner_contexts[$i] | has(\"claudemd_file\")" "$temp_config")
+            
+            if [ "$has_path" = "false" ]; then
+                # Generate auto-path from name
+                local name=$(jq -r ".runner_contexts[$i].name // empty" "$temp_config")
+                
+                if [ -n "$name" ]; then
+                    local path=$(generate_path "$name")
+                    
+                    # Add claudemd_file to object
+                    temp_config2=$(mktemp)
+                    jq ".runner_contexts[$i].claudemd_file = \"$path\"" "$temp_config" > "$temp_config2"
+                    mv "$temp_config2" "$temp_config"
+                    contexts_updated=true
+                    
+                    log_info "Added auto-path to context '$name' → '$path'"
+                else
+                    log_error "Context object missing both 'name' and 'claudemd_file' at index $i"
+                    rm "$temp_config"
+                    exit 1
+                fi
+            fi
+        else
+            log_error "Invalid context type at index $i: expected string or object"
+            rm "$temp_config"
+            exit 1
+        fi
+    done
+    
+    # Update original config if changes were made
+    if [ "$contexts_updated" = true ]; then
+        if [ "$DRY_RUN" = false ]; then
+            # Save the normalized config to a new file
+            local config_dir=$(dirname "$config_file")
+            local config_name=$(basename "$config_file" .json)
+            local new_config_file="$config_dir/$config_name.json.new"
+            
+            cp "$temp_config" "$new_config_file"
+            log_info "Created normalized config: $new_config_file"
+            log_info "Original config unchanged: $config_file"
+        else
+            log_dry "Would create normalized config: $(dirname "$config_file")/$(basename "$config_file" .json).json.new"
+            log_dry "Original config would remain unchanged"
+        fi
+    fi
+    
+    # Return the normalized config content
+    cat "$temp_config"
+    rm "$temp_config"
+}
+
 build_generation_prompt() {
+    local name="$1"
+    local description="$2" 
+    local config_prompts="$3"
+    local task_name="$4"
+    
     local generation_prompt="I need you to create a CLAUDE.md context file. This file will be used to influence how Claude behaves when loaded as context for specific tasks.
 
-Requirements based on user input:
+Context requirements:
 "
     
-    # Add each user prompt as a requirement
-    local i=1
-    for prompt in "${PROMPTS[@]}"; do
-        generation_prompt+="$i. $prompt
+    if [ -n "$description" ]; then
+        generation_prompt+="DESCRIPTION: $description
 "
-        ((i++))
-    done
-
+    elif [ -n "$name" ]; then
+        generation_prompt+="ROLE: Create a context for a '$name' approach/personality
+"
+    else
+        generation_prompt+="CREATIVE: Generate a unique, creative context approach
+"
+    fi
+    
+    if [ -n "$config_prompts" ]; then
+        generation_prompt+="TASK RELEVANCE: This context will be used for tasks like: $config_prompts
+"
+    fi
+    
+    if [ -n "$task_name" ]; then
+        generation_prompt+="SPECIALIZATION: Focus on approaches suitable for '$task_name' workflows
+"
+    fi
+    
     # Add template reference if provided
     if [ -n "$TEMPLATE_FILE" ]; then
         generation_prompt+="
@@ -181,7 +347,7 @@ TEMPLATE REFERENCE: Use the CLAUDE.md template provided as context to understand
     generation_prompt+="
 Please create a comprehensive CLAUDE.md file that includes:
 
-1. **Context Title**: Clear header describing the context
+1. **Context Title**: Clear header describing the project
 2. **Primary Priorities**: 3-4 main focus areas
 3. **Guidelines**: Specific rules and approaches to follow  
 4. **Code Style**: Preferred coding patterns and practices
@@ -194,40 +360,89 @@ Return ONLY the CLAUDE.md file content - no explanations, no wrapper text, just 
     echo "$generation_prompt"
 }
 
-generate_context() {
-    local context_dir="$OUTPUT_DIR/$CONTEXT_NAME"
+generate_random_context_prompt() {
+    local config_prompts="$1"
+    local task_name="$2"
+    
+    # Use Claude to generate a creative context idea
+    local meta_prompt="Generate a short, creative description (1-2 sentences) for a unique CLAUDE.md context that would bring an interesting perspective to tasks like: $config_prompts"
+    
+    if [ -n "$task_name" ]; then
+        meta_prompt+=" (specifically for '$task_name' workflows)"
+    fi
+    
+    meta_prompt+=". Focus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect'. Return only the description, no extra text."
+    
+    echo "$meta_prompt" | claude 2>/dev/null || echo "Creative problem-solving expert with unconventional approaches"
+}
+
+generate_single_context() {
+    local name="$1"
+    local description="$2"
+    local claudemd_file="$3"
+    local config_prompts="$4"
+    local task_name="$5"
+    
+    local context_dir=$(dirname "$claudemd_file")
+    
+    # Check if file exists and should be skipped
+    if [ -f "$claudemd_file" ] && [ "$FORCE_REGENERATE" = false ]; then
+        log_info "Context exists, skipping: $claudemd_file"
+        return 0
+    fi
+    
+    if [ "$DRY_RUN" = true ]; then
+        log_dry "Would generate context: $claudemd_file"
+        if [ -n "$name" ]; then
+            log_dry "  Name: $name"
+        fi
+        if [ -n "$description" ]; then
+            log_dry "  Description: $description"
+        else
+            log_dry "  Type: Auto-generated from name"
+        fi
+        return 0
+    fi
+    
+    # Generate random description if neither name nor description provided
+    if [ -z "$name" ] && [ -z "$description" ]; then
+        if [ "$DRY_RUN" = true ]; then
+            description="[Random context would be generated]"
+        else
+            log_info "Generating random context description..."
+            description=$(generate_random_context_prompt "$config_prompts" "$task_name")
+            log_info "Generated description: $description"
+        fi
+    fi
     
     log_info "Creating context directory: $context_dir"
     mkdir -p "$context_dir"
     
-    if [ -f "$context_dir/CLAUDE.md" ]; then
-        log_warn "CLAUDE.md already exists in $context_dir"
-        read -p "Overwrite existing file? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Cancelled by user"
-            exit 0
-        fi
+    if [ -f "$claudemd_file" ]; then
+        log_warn "Overwriting existing context: $claudemd_file"
     fi
     
-    log_info "Generating context: $CONTEXT_NAME"
-    log_info "Using ${#PROMPTS[@]} prompt(s) for generation"
+    log_info "Generating context: ${name:-random} → $claudemd_file"
     
-    # Build and run the generation prompt
+    # Build generation prompt
     local generation_prompt
-    generation_prompt=$(build_generation_prompt)
-    
-    log_info "Sending prompts to Claude CLI..."
+    generation_prompt=$(build_generation_prompt "$name" "$description" "$config_prompts" "$task_name")
     
     # Create temp file for generation prompt
     local temp_prompt=$(mktemp)
     echo "$generation_prompt" > "$temp_prompt"
     
+    # Look for template in project_template/CLAUDE.md
+    local effective_template="$TEMPLATE_FILE"
+    if [ -f "project_template/CLAUDE.md" ]; then
+        effective_template="project_template/CLAUDE.md"
+        log_info "Using project template: project_template/CLAUDE.md"
+    fi
+    
     # Run Claude CLI and capture output
-    # If template provided, pipe it as context; otherwise just use the prompt
-    if [ -n "$TEMPLATE_FILE" ]; then
-        log_info "Piping template file as context to Claude..."
-        if cat "$TEMPLATE_FILE" | claude -p "$(cat "$temp_prompt")" > "$context_dir/CLAUDE.md" 2>/dev/null; then
+    if [ -n "$effective_template" ]; then
+        log_info "Using template: $effective_template"
+        if cat "$effective_template" | claude -p "$(cat "$temp_prompt")" > "$claudemd_file" 2>/dev/null; then
             rm "$temp_prompt"
         else
             rm "$temp_prompt"
@@ -235,7 +450,7 @@ generate_context() {
             return 1
         fi
     else
-        if claude < "$temp_prompt" > "$context_dir/CLAUDE.md" 2>/dev/null; then
+        if claude < "$temp_prompt" > "$claudemd_file" 2>/dev/null; then
             rm "$temp_prompt"
         else
             rm "$temp_prompt"
@@ -245,72 +460,120 @@ generate_context() {
     fi
     
     # Verify output is not empty
-    if [ ! -s "$context_dir/CLAUDE.md" ]; then
-        log_error "Generated context file is empty"
+    if [ ! -s "$claudemd_file" ]; then
+        log_error "Generated context file is empty: $claudemd_file"
         return 1
     fi
     
-    log_info "✅ Context generated successfully"
-    log_info "Location: $context_dir/CLAUDE.md"
-    
-    # Show usage example
-    echo
-    echo "========================================="
-    echo "Context Usage Example:"
-    echo "========================================="
-    cat << EOF
-In config file:
-{
-  "prompts": ["Your task here"],
-  "runner_contexts": [
-    {"name": "$CONTEXT_NAME", "claudemd_path": "$context_dir/CLAUDE.md"}
-  ]
-}
-
-In CLI:
-./multi-simple.sh -p "Your task" -c "$CONTEXT_NAME:$context_dir/CLAUDE.md"
-EOF
-    echo "========================================="
-    
+    log_info "✅ Context generated successfully: $claudemd_file"
     return 0
 }
 
-show_context_preview() {
-    local context_dir="$OUTPUT_DIR/$CONTEXT_NAME"
+process_config_contexts() {
+    local config_content="$1"
     
+    # Extract config data
+    local config_prompts=$(echo "$config_content" | jq -r '.prompts[]? // empty' | paste -sd, -)
+    local task_name=$(echo "$config_content" | jq -r '.task_name // empty')
+    local contexts_count=$(echo "$config_content" | jq '.runner_contexts | length')
+    
+    log_info "Processing $contexts_count context(s)"
+    if [ -n "$config_prompts" ]; then
+        log_info "Task prompts: $config_prompts"
+    fi
+    if [ -n "$task_name" ]; then
+        log_info "Task name: $task_name"
+    fi
+    
+    # Process each context
+    local success_count=0
+    local skip_count=0
+    local error_count=0
+    
+    for ((i=0; i<contexts_count; i++)); do
+        # Get values directly from the JSON rather than parsing extracted values
+        local name=$(echo "$config_content" | jq -r ".runner_contexts[$i].name // empty")
+        local description=$(echo "$config_content" | jq -r ".runner_contexts[$i].description // empty")
+        local claudemd_file=$(echo "$config_content" | jq -r ".runner_contexts[$i].claudemd_file // empty")
+        
+        # If it's a string context, the claudemd_file will be empty and name will be empty
+        # In that case, get the string value itself
+        if [ -z "$claudemd_file" ] && [ -z "$name" ]; then
+            local context_type=$(echo "$config_content" | jq -r ".runner_contexts[$i] | type")
+            if [ "$context_type" = "string" ]; then
+                # This shouldn't happen after normalization, but handle it anyway
+                log_error "String context at index $i was not normalized"
+                continue
+            fi
+        fi
+        
+        log_info "Processing context $(($i + 1))/$contexts_count..."
+        
+        if generate_single_context "$name" "$description" "$claudemd_file" "$config_prompts" "$task_name"; then
+            if [ -f "$claudemd_file" ]; then
+                ((success_count++))
+            else
+                ((skip_count++))
+            fi
+        else
+            ((error_count++))
+        fi
+    done
+    
+    # Summary
     echo
     echo "========================================="
-    echo "Generated Context Preview:"
+    echo "Generation Summary:"
     echo "========================================="
-    head -n 20 "$context_dir/CLAUDE.md"
-    
-    local line_count=$(wc -l < "$context_dir/CLAUDE.md")
-    if [ "$line_count" -gt 20 ]; then
-        echo "..."
-        echo "(showing first 20 lines of $line_count total)"
+    log_info "Generated: $success_count contexts"
+    if [ $skip_count -gt 0 ]; then
+        log_info "Skipped: $skip_count existing contexts"
+    fi
+    if [ $error_count -gt 0 ]; then
+        log_error "Failed: $error_count contexts"
     fi
     echo "========================================="
+    
+    return $([ $error_count -eq 0 ] && echo 0 || echo 1)
 }
+
+run_main() {
+    log_info "Config file: $CONFIG_FILE"
+    
+    # Normalize runner contexts and get updated config
+    local normalized_config
+    normalized_config=$(normalize_runner_contexts "$CONFIG_FILE")
+    
+    # Process all contexts
+    if process_config_contexts "$normalized_config"; then
+        log_info "✅ All contexts processed successfully"
+        
+        if [ "$DRY_RUN" = false ]; then
+            # Check if a .new file was created
+            local config_dir=$(dirname "$CONFIG_FILE")
+            local config_name=$(basename "$CONFIG_FILE" .json)
+            local new_config_file="$config_dir/$config_name.json.new"
+            
+            if [ -f "$new_config_file" ]; then
+                echo
+                echo "Ready to run: ./multi-simple.sh $new_config_file"
+            else
+                echo
+                echo "Ready to run: ./multi-simple.sh $CONFIG_FILE"
+            fi
+        fi
+        return 0
+    else
+        log_error "❌ Some contexts failed to generate"
+        return 1
+    fi
+}
+
 
 main() {
     parse_arguments "$@"
     validate_requirements
-    
-    log_info "Starting context generation"
-    log_info "Context name: $CONTEXT_NAME"
-    log_info "Output directory: $OUTPUT_DIR"
-    log_info "Number of prompts: ${#PROMPTS[@]}"
-    if [ -n "$TEMPLATE_FILE" ]; then
-        log_info "Template file: $TEMPLATE_FILE"
-    fi
-    
-    if generate_context; then
-        show_context_preview
-        log_info "Context generation completed successfully"
-    else
-        log_error "Context generation failed"
-        exit 1
-    fi
+    run_main
 }
 
 # Run main function with all arguments

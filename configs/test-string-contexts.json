@@ -1,0 +1,12 @@
+{
+  "prompts": [
+    "Create a simple calculator function"
+  ],
+  "num_runners": 1,
+  "task_name": "calculator-test",
+  "runner_contexts": [
+    "security expert",
+    "performance optimizer",
+    "beginner friendly"
+  ]
+}

@@ -40,7 +40,7 @@ Config File Format:
     "num_runners": 3,
     "max_parallel": 2,
     "runner_contexts": [
-      {"name": "security", "claudemd_path": "path/to/CLAUDE.md"}
+      {"name": "security", "claudemd_file": "runner-contexts/security/CLAUDE.md"}
     ]
   }
 
@@ -128,7 +128,7 @@ if [[ "$1" == -* ]]; then
             if [[ "$context" == *":"* ]]; then
                 name="${context%%:*}"     # Everything before first :
                 path="${context#*:}"      # Everything after first :
-                RUNNER_CONTEXTS+="{\"name\":\"$name\",\"claudemd_path\":\"$path\"},"
+                RUNNER_CONTEXTS+="{\"name\":\"$name\",\"claudemd_file\":\"$path\"},"
             else
                 echo "ERROR: Context format should be 'name:path', got: $context"
                 exit 1
@@ -159,7 +159,7 @@ elif [ -f "$1" ]; then
     NUM_RUNNERS=$(jq -r '.num_runners // 3' "$CONFIG_FILE")
     # Auto-scale parallelism - default to num_runners unless specified
     MAX_PARALLEL=$(jq -r '.max_parallel // '$NUM_RUNNERS "$CONFIG_FILE")
-    TEMPLATE_DIR=$(jq -r '.template_directory // ""' "$CONFIG_FILE")
+    TEMPLATE_DIR=$(jq -r '.project_template // ""' "$CONFIG_FILE")
     EXEC_MODE=$(jq -r '.execution_mode // "sequential"' "$CONFIG_FILE")
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
@@ -252,13 +252,13 @@ setup_runner() {
             # Use modulus to cycle through contexts if fewer contexts than runners
             local context_index=$(( (runner_num - 1) % contexts_count ))
             local context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].name // \"context_$context_index\"")
-            local claudemd_path=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].claudemd_path // \"\"")
+            local claudemd_file=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].claudemd_file // \"\"")
             
-            if [ -n "$claudemd_path" ] && [ "$claudemd_path" != "null" ] && [ -f "$claudemd_path" ]; then
-                echo "[Runner $runner_num] Using context: $context_name ($claudemd_path)" >&2
-                cp "$claudemd_path" "$runner_dir/CLAUDE.md" 2>/dev/null || true
-            else
-                echo "[Runner $runner_num] Warning: Context file not found: $claudemd_path" >&2
+            if [ -n "$claudemd_file" ] && [ "$claudemd_file" != "null" ] && [ -f "$claudemd_file" ]; then
+                echo "[Runner $runner_num] Using context: $context_name ($claudemd_file)" >&2
+                cp "$claudemd_file" "$runner_dir/CLAUDE.md" 2>/dev/null || true
+            elif [ -n "$claudemd_file" ] && [ "$claudemd_file" != "null" ]; then
+                echo "[Runner $runner_num] Warning: Context file not found: $claudemd_file" >&2
             fi
         fi
     fi
@@ -427,7 +427,7 @@ else
   "max_parallel": $MAX_PARALLEL,
   "task_name": "$TASK_NAME",
   "base_directory": "$BASE_DIR",
-  "template_directory": "$TEMPLATE_DIR",
+  "project_template": "$TEMPLATE_DIR",
   "execution_mode": "$EXEC_MODE",
   "runner_contexts": $RUNNER_CONTEXTS
 }

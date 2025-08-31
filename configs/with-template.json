@@ -4,6 +4,6 @@
   "max_parallel": 3,
   "base_directory": "./results",
   "task_name": "with-template",
-  "template_directory": "./starter-app",
+  "project_template": "./starter-app",
   "execution_mode": "parallel"
 }

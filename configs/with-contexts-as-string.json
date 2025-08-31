@@ -9,8 +9,8 @@
   "task_name": "santa-claus-ascii-art",
   "execution_mode": "parallel",
   "runner_contexts": [
-    {"name": "car-lover", "claudemd_file": "runner-contexts/car-lover/CLAUDE.md"},
-    {"name": "cat-lover", "claudemd_file": "runner-contexts/cat-lover/CLAUDE.md"},
-    {"name": "computer-lover", "claudemd_file": "runner-contexts/computer-lover/CLAUDE.md"}
+    "too many emojis",
+    "only use numbers and symbols",
+    "only use letters"
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "prompts": [
+    "Return a string with ASCII art of santa claus in a christmas scene",
+    "Return a string with ASCII art of a cute halloween scene"
+  ],
+  "num_runners": 1,
+  "max_parallel": 3,
+  "base_directory": "./results",
+  "task_name": "santa-claus-ascii-art",
+  "execution_mode": "parallel",
+  "runner_contexts": [
+    {
+      "name": "I-ll-help-you-summarize-the-string-too-many-emojis-in-three-words-using-kebab-case-My-response-is-emoji-overload-alert",
+      "claudemd_file": "runner-contexts/I-ll-help-you-summarize-the-string-too-many-emojis-in-three-words-using-kebab-case-My-response-is-emoji-overload-alert/CLAUDE.md"
+    },
+    {
+      "name": "only-use-numbers-and-symbols",
+      "claudemd_file": "runner-contexts/only-use-numbers-and-symbols/CLAUDE.md"
+    },
+    {
+      "name": "only-use-letters",
+      "claudemd_file": "runner-contexts/only-use-letters/CLAUDE.md"
+    }
+  ]
+}
