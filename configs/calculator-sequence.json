@@ -1,0 +1,13 @@
+{
+  "prompts": [
+    "Create a basic HTML page with a calculator interface - just the layout with buttons for numbers 0-9, basic operations (+, -, *, /), equals, and clear",
+    "Add CSS styling to make the calculator look professional and modern with a nice color scheme",
+    "Add JavaScript functionality to make the calculator actually work - handle button clicks, perform calculations, and display results",
+    "Add advanced features like keyboard support, decimal point handling, and basic error checking for division by zero"
+  ],
+  "num_runners": 3,
+  "max_parallel": 2,
+  "base_directory": "./results",
+  "task_name": "calculator-sequence",
+  "execution_mode": "parallel"
+}

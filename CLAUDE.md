@@ -1,265 +1,163 @@
 # CLAUDE.md
 
-Multi-runner orchestration system for Claude CLI tasks using JSON configuration.
+Multi-runner orchestration system for Claude CLI tasks.
 
-## Two Versions Available
+## 🚀 **Quick Start** (Most Users)
 
-### 1. **Full Version** (`multi-run.sh`)
-Complete orchestration with git worktrees, branches, looping, and prompt modifications.
+```bash
+# Simple parallel execution
+./multi-simple.sh -p "Create a calculator app" -n 3
 
-### 2. **Simple Version** (`multi-simple.sh`)  
-Lightweight runner for testing multiple Claude approaches without git complexity.
+# Multiple prompts in sequence  
+./multi-simple.sh -p "Create HTML" "Add CSS" "Add JavaScript" -n 2
+
+# With config file
+./multi-simple.sh configs/simple/my-task.json
+```
+
+## 📊 **Tool Comparison**
+
+| | **multi-simple.sh** | **multi-run.sh** |
+|---|---|---|
+| **Best For** | Quick experiments, A/B testing | Production workflows, complex automation |
+| **Git Integration** | ❌ None | ✅ Worktrees + branches + auto-commit |
+| **Complexity** | Simple prompt sequences | Advanced looping + conditions + modifications |
+| **Learning Curve** | 5 minutes | 30 minutes |
+| **Use Cases** | • Test different approaches<br>• Compare solutions<br>• Quick prototyping | • Multi-step workflows<br>• Branch-based development<br>• Complex orchestration |
+
+## 🎯 **Which Tool Should I Use?**
+
+**Choose `multi-simple.sh` if you want to:**
+- Quickly test how Claude handles the same task differently
+- Compare multiple approaches side-by-side
+- Run simple sequences without git complexity
+- Get started immediately
+
+**Choose `multi-run.sh` if you need:**
+- Git integration with branches and commits
+- Complex multi-step workflows with conditions
+- Loop-based execution with break conditions
+- Advanced prompt modifications per runner
 
 ---
 
-# Simple Version (`multi-simple.sh`)
+# multi-simple.sh - Quick Parallel Testing
 
-## Purpose
-Run the same prompt multiple times in parallel to compare different Claude approaches. No git, no loops, just parallel execution with optional template directories.
-
-## Quick Start
-
-```bash
-# Make executable
-chmod +x multi-simple.sh
-
-# Run with config
-./multi-simple.sh configs/simple/basic.json
-
-# Check progress
-watch "grep -H . runs/*/runner_*/status.txt"
-```
-
-## Simple Configuration
-
-```json
-{
-  "prompt": "Build a calculator web application",
-  "num_runners": 5,
-  "max_parallel": 3,
-  "base_directory": "./runs",
-  "template_directory": "./starter-app",
-  "execution_mode": "parallel"
-}
-```
-
-### Configuration Properties
-- `prompt` (required): The Claude prompt to execute
-- `num_runners`: Number of times to run (default: 3)
-- `max_parallel`: Max concurrent runs (default: 5)
-- `base_directory`: Output location (default: "./runs")
-- `template_directory`: Optional starter code to copy
-- `execution_mode`: "parallel" or "sequential" (default: "sequential")
-
-## Output Structure
-
-```
-runs/
-└── 20241125_143022/        # Timestamped run
-    ├── config.json          # Config used
-    ├── execution.log        # Overall timing
-    ├── runner_1/
-    │   ├── status.txt       # running/completed/failed
-    │   ├── timing.log       # Start/end times
-    │   ├── output.log       # Claude output
-    │   └── [template files] # If template used
-    └── runner_2/
-        └── ...
-```
-
-## Use Cases
-- **Compare approaches**: See how Claude solves the same problem differently
-- **Test consistency**: Verify response reliability
-- **Refactoring tests**: Start from template, compare refactoring strategies
-- **Bug fix approaches**: Multiple solutions to the same bug
-- **Performance testing**: Run many instances with controlled parallelism
-
----
-
-# Full Version (`multi-run.sh`)
-
-## Purpose
-Complete orchestration with git worktrees, branches, looping, and runner-specific prompt modifications for complex multi-agent workflows.
-
-## Prerequisites
-
-- Claude CLI installed and configured
-- `jq` JSON processor (`brew install jq` / `sudo apt-get install jq`)
-- Git repository for target project
-
-## Quick Start
-
-```bash
-# Make executable
-chmod +x multi-run.sh
-
-# Run with config
-./multi-run.sh configs/my-config.json
-
-# View logs  
-tail -f logs/runner-name-log.log
-```
-
-## Full Configuration Structure
-
-```json
-{
-  "task_name": "my_task",
-  "task_description": "Task description",
-  "git_project_path": "../my-project",
-  "git_base_branch": "main",
-  "worktree_base_path": "worktrees", 
-  "execution_mode": "sequential",
-  "max_loops": 10,
-  
-  "initial_prompts": [
-    {
-      "name": "setup",
-      "prompt": "Initialize the project",
-      "skip_condition": "[ -f package.json ]"
-    }
-  ],
-  "loop_prompts": [
-    {
-      "name": "develop",
-      "prompt": "Continue development",
-      "period": 1
-    }
-  ],
-  "loop_break_condition": {
-    "name": "done", 
-    "file": "COMPLETE.flag"
-  },
-  "end_prompts": [
-    {
-      "name": "finalize",
-      "prompt": "Clean up and summarize"
-    }
-  ],
-  
-  "runners": [
-    {
-      "name": "approach_one",
-      "prompt_modifications": {
-        "append_to_all": " Focus on maintainability.",
-        "append_to_initial": " Use best practices.",
-        "append_to_loop": " Refactor as needed.",
-        "append_to_final": " Document changes."
-      },
-      "extra_prompts": {
-        "initial_prompts": [],
-        "loop_prompts": [],
-        "end_prompts": []
-      }
-    }
-  ]
-}
-```
-
-## Configuration Properties
-
-### Required
-- `git_project_path`: Path to target git repository
-
-### Optional
-- `task_name`: Unique identifier (auto-generated if missing)
-- `task_description`: Description (default: "No description provided")
-- `git_base_branch`: Starting branch (default: "main") 
-- `worktree_base_path`: Worktree directory (default: "worktrees")
-- `execution_mode`: "sequential" or "parallel" (default: "sequential")
-- `max_loops`: Maximum iterations (default: 10)
-- `runners`: Array of runner configs (default: single "default" runner)
-
-### Prompts
-- `initial_prompts`: Run once at start (supports `skip_condition`)
-- `loop_prompts`: Run repeatedly (supports `period` for frequency)
-- `loop_break_condition`: File-based exit trigger
-- `end_prompts`: Run once before completion
-
-### Runner Customization
-- `prompt_modifications`: Append text to prompts
-- `extra_prompts`: Add runner-specific prompts
-
-## Architecture
-
-```
-multiclaude/
-├── multi-run.sh           # Main orchestrator
-├── lib/
-│   ├── config.sh          # Configuration parsing
-│   ├── path-utils.sh      # Path utilities
-│   ├── git-ops.sh         # Git operations
-│   ├── runner-exec.sh     # Claude execution
-│   └── logging.sh         # Logging utilities
-└── configs/               # Configuration files
-
-../my-project/             # Target git repository
-../worktrees/              # Runner worktrees
-    └── task_runner/       # Individual runner worktree
-```
-
-## Execution Flow
-
-1. **Validation**: Check dependencies and configuration
-2. **Setup**: Create worktrees and branches for each runner
-3. **Initial**: Execute initial prompts (with skip conditions)
-4. **Loop**: Run loop prompts based on period (skip if none defined)
-5. **End**: Execute end prompts
-6. **Commit**: Auto-commit all changes
+**Perfect for:** Experimenting, comparing approaches, quick prototyping
 
 ## Features
+- ✅ **CLI or Config**: Use command line flags or JSON config files
+- ✅ **Prompt Sequences**: Single prompts or multi-step sequences  
+- ✅ **Parallel Control**: Control how many run simultaneously
+- ✅ **Context Support**: Different "personalities" per runner
+- ✅ **Template Support**: Start from existing code
+- ✅ **No Git Required**: Pure directory-based execution
 
-- **Parallel/Sequential Execution**: Run multiple approaches simultaneously or one-by-one
-- **Git Worktree Isolation**: Each runner works in its own branch
-- **Auto-commit**: Changes automatically committed with descriptive messages
-- **Prompt Modifications**: Customize prompts per runner
-- **Skip Conditions**: Conditionally skip initial prompts
-- **Period-based Execution**: Control loop prompt frequency
-- **File-based Exit**: Stop execution when marker file appears
-- **Rate Limit Handling**: Automatic retry with backoff
+## Usage Modes
 
-## Examples
+### **Command Line (Recommended)**
+```bash
+# Single prompt, multiple runners
+./multi-simple.sh -p "Create a calculator app" -n 3
 
-### Single Runner
-```json
-{
-  "git_project_path": "../my-app",
-  "initial_prompts": [
-    {"name": "start", "prompt": "Create a React app"}
-  ],
-  "loop_prompts": [
-    {"name": "develop", "prompt": "Add features", "period": 1}
-  ],
-  "max_loops": 3
-}
+# Multi-step sequence
+./multi-simple.sh -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
+
+# With different contexts/personalities
+./multi-simple.sh -p "Build auth system" -n 3 \
+  -c "security:runner-contexts/security-focused/CLAUDE.md" \
+  -c "beginner:runner-contexts/beginner-friendly/CLAUDE.md"
 ```
 
-### Multiple Approaches
+### **Config File Mode**
 ```json
 {
-  "git_project_path": "../my-app",
-  "execution_mode": "parallel",
-  "runners": [
-    {
-      "name": "typescript",
-      "prompt_modifications": {
-        "append_to_all": " Use TypeScript."
-      }
-    },
-    {
-      "name": "javascript",
-      "prompt_modifications": {
-        "append_to_all": " Use JavaScript."
-      }
-    }
+  "prompts": ["Create calculator", "Add styling", "Add tests"],
+  "num_runners": 3,
+  "max_parallel": 2,
+  "runner_contexts": [
+    {"name": "security", "claudemd_path": "runner-contexts/security-focused/CLAUDE.md"}
   ]
 }
 ```
 
-## Tips
+## CLI Options
+- `-p, --prompts "p1" "p2" ...` - Prompts to execute (required)
+- `-n, --num-runners N` - Number of runners (default: 3)
+- `-m, --max-parallel N` - Max concurrent runners 
+- `-t, --task-name NAME` - Custom task name
+- `-c, --runner-context "name:path"` - Context files (repeatable)
+- `--template-directory PATH` - Starter code to copy
 
-- Keep prompts focused and specific
-- Use skip conditions to avoid redundant operations
-- Set appropriate max_loops to prevent infinite execution
-- Review logs for debugging: `logs/runner-name-log.log`
-- Clean up worktrees when done: `git worktree prune`
+## Output Structure
+```
+results/task-name/
+├── runner_1/
+│   ├── CLAUDE.md           # Context (if used)
+│   ├── prompt_1.log        # First prompt output
+│   ├── prompt_2.log        # Second prompt output
+│   ├── timing.log          # Execution timing
+│   └── status.txt          # completed/failed
+└── index.md               # Summary of all runs
+```
+
+---
+
+# multi-run.sh - Advanced Git Workflows
+
+**Perfect for:** Production automation, complex workflows, git-based development
+
+## Features
+- ✅ **Git Integration**: Automatic worktrees, branches, and commits
+- ✅ **Advanced Looping**: Conditional loops with break conditions
+- ✅ **Prompt Modifications**: Runner-specific prompt customization
+- ✅ **Skip Conditions**: Conditional execution logic
+- ✅ **Rate Limit Handling**: Automatic retry with backoff
+- ✅ **Branch Management**: Each runner gets its own git branch
+
+## Prerequisites
+- `jq` JSON processor
+- Git repository for target project
+- More complex setup and configuration
+
+## Quick Start
+```bash
+./multi-run.sh configs/full/workflow-config.json
+```
+
+For detailed documentation of the full version, see the existing configuration files in `configs/` and the library documentation.
+
+---
+
+## 🔧 **Setup & Prerequisites**
+
+### Both Tools Require:
+- Claude CLI installed and configured
+- `jq` JSON processor (`brew install jq` / `sudo apt-get install jq`)
+
+### Simple Tool Only:
+- Just run from any directory
+- No additional setup needed
+
+### Full Tool Additionally Needs:
+- Git repository for target project  
+- Understanding of git worktrees and branches
+
+## 💡 **Tips**
+
+- **Start with `multi-simple.sh`** - Most users find it meets their needs
+- **Use contexts** for testing different approaches (security-focused vs beginner-friendly)
+- **Check the logs** while running: `tail -f results/*/runner_*/prompt_*.log`
+- **Generate contexts** with `./generate-contexts.sh` for common personalities
+
+## 📁 **Project Structure**
+```
+multiclaude/
+├── multi-simple.sh              # 👈 Start here (simple parallel runner)
+├── multi-run.sh                 # Advanced git-based workflows
+├── generate-contexts.sh         # Create personality contexts
+├── configs/
+│   └── simple/                  # Simple runner configs
+├── runner-contexts/             # Pre-built contexts (security, performance, etc.)
+└── examples/                    # Usage examples
+```

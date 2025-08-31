@@ -1,0 +1,9 @@
+{
+  "prompts": ["Refactor this code for better performance and add comprehensive error handling"],
+  "num_runners": 5,
+  "max_parallel": 3,
+  "base_directory": "./results",
+  "task_name": "with-template",
+  "template_directory": "./starter-app",
+  "execution_mode": "parallel"
+}

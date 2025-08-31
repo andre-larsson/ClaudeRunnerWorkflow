@@ -1,0 +1,8 @@
+{
+  "prompts": ["Create file file1.txt and file2.txt and exit."],
+  "num_runners": 3,
+  "max_parallel": 2,
+  "base_directory": "./results",
+  "task_name": "basic",
+  "execution_mode": "parallel"
+}

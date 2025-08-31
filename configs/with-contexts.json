@@ -1,0 +1,16 @@
+{
+  "prompts": [
+    "Return a string with ASCII art of santa claus in a christmas scene",
+    "Return a string with ASCII art of a cute halloween scene"
+  ],
+  "num_runners": 1,
+  "max_parallel": 3,
+  "base_directory": "./results",
+  "task_name": "santa-claus-ascii-art",
+  "execution_mode": "parallel",
+  "runner_contexts": [
+    {"name": "car-lover", "claudemd_path": "runner-contexts/car-lover/CLAUDE.md"},
+    {"name": "cat-lover", "claudemd_path": "runner-contexts/cat-lover/CLAUDE.md"},
+    {"name": "computer-lover", "claudemd_path": "runner-contexts/computer-lover/CLAUDE.md"}
+  ]
+}

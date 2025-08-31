@@ -3,10 +3,17 @@ design/
 logs/
 *.log
 
-# Generated runner configs
+# Simple runner output directories
+results/
+runs/
+
+# Generated runner configs (keep example configs)
 *-config.json
 !test-*.json
 !*-test-config.json
+
+# But track example configs in configs/ directory
+!configs/**/*.json
 
 # Temporary files
 *.tmp
@@ -17,11 +24,13 @@ temp/
 worktrees/
 *-worktrees/
 
-# State files
+# State files and markers
 TASKS_DONE
 GAME_DONE
 DONE
 *.state
+*.flag
+COMPLETE.flag
 
 # Backup files
 *.bak
@@ -63,6 +72,11 @@ venv/
 local-*.json
 .env
 .env.local
+
+# User-created test configurations
+my-*.json
+personal-*.json
+experiment-*.json
 
 # Test results and coverage
 test-results/

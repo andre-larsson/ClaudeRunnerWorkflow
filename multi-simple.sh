@@ -5,46 +5,147 @@
 set -e
 
 # Help message
-if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ $# -eq 0 ]; then
     cat << EOF
-Usage:  $0 [config.json]
-        $0 "prompt text" [num_runners](optional) [TASK_NAME](optional) [base_directory](optional)
+Usage:  $0 -p "prompt1" ["prompt2" ...] [options]
+        $0 [config.json]
+
+Command Line Options:
+  -p, --prompts "p1" "p2" ...    Prompts to execute (required)
+  -n, --num-runners N            Number of runners (default: 3)
+  -m, --max-parallel N           Max parallel runners (default: num_runners)
+  -t, --task-name NAME           Task name for output directory
+  -b, --base-directory PATH      Base output directory (default: ./results)
+  --template-directory PATH      Template directory to copy
+  -c, --runner-context "name:path"  Runner context (can repeat)
+  -e, --execution-mode MODE      parallel|sequential (default: parallel)
 
 Examples:
-  # With config file:
+  # Single prompt via CLI:
+  $0 -p "Create a calculator app" -n 3
+  
+  # Multiple prompts via CLI:
+  $0 -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
+  
+  # With contexts:
+  $0 -p "Build auth system" -n 3 -c "security:runner-contexts/security-focused/CLAUDE.md"
+  
+  # Config file mode:
   $0 config.json
   
-  # Direct prompt (no config file):
-  $0 "Build a calculator app"
-  $0 "Fix the bug in auth.js" 5 "auth-bug-fix" "results"
-  
-  # Minimal config.json (single prompt):
-  {"prompts": ["Your prompt here"]}
-  
-  # Minimal config.json (prompt sequence):
-  {"prompts": ["Create basic app", "Add styling", "Add features"]}
-  
-  # Full config.json:
+
+Config File Format:
   {
-    "prompts": ["Prompt 1", "Prompt 2", "Prompt 3"],
-    "num_runners": 5,
-    "max_parallel": 3,
-    "task_name": "descriptive-name",
-    "template_directory": "./starter-app",
+    "prompts": ["Prompt 1", "Prompt 2"],
+    "num_runners": 3,
+    "max_parallel": 2,
     "runner_contexts": [
-      {"name": "security-expert", "claudemd_path": "runner-contexts/security-focused/CLAUDE.md"}
+      {"name": "security", "claudemd_path": "path/to/CLAUDE.md"}
     ]
   }
-  
-  Note: All configs must use "prompts" array (even for single prompts).
 
 Output: results/TASK_NAME/runner_*/
 EOF
     exit 0
 fi
 
-# Parse arguments - support both config file and direct prompt
-if [ -f "$1" ]; then
+# Parse arguments - support CLI flags, config file, and positional args
+if [[ "$1" == -* ]]; then
+    # CLI mode - parse command line arguments
+    PROMPTS_ARRAY=()
+    CONTEXTS_ARRAY=()
+    NUM_RUNNERS=3
+    MAX_PARALLEL=""
+    TASK_NAME_ARG=""
+    BASE_DIR="./results"
+    TEMPLATE_DIR=""
+    EXEC_MODE="parallel"
+    CONFIG_FILE=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -p|--prompts)
+                shift  # Skip the -p flag
+                # Collect all non-flag arguments as prompts
+                while [[ $# -gt 0 ]] && [[ "$1" != -* ]]; do
+                    PROMPTS_ARRAY+=("$1")
+                    shift
+                done
+                ;;
+            -n|--num-runners)
+                NUM_RUNNERS="$2"
+                shift 2
+                ;;
+            -m|--max-parallel)
+                MAX_PARALLEL="$2"
+                shift 2
+                ;;
+            -t|--task-name)
+                TASK_NAME_ARG="$2"
+                shift 2
+                ;;
+            -b|--base-directory)
+                BASE_DIR="$2"
+                shift 2
+                ;;
+            --template-directory)
+                TEMPLATE_DIR="$2"
+                shift 2
+                ;;
+            -c|--runner-context)
+                CONTEXTS_ARRAY+=("$2")
+                shift 2
+                ;;
+            -e|--execution-mode)
+                EXEC_MODE="$2"
+                shift 2
+                ;;
+            *)
+                echo "ERROR: Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Convert prompts array to JSON
+    if [ ${#PROMPTS_ARRAY[@]} -gt 0 ]; then
+        PROMPTS="["
+        for prompt in "${PROMPTS_ARRAY[@]}"; do
+            # Escape quotes in prompt for JSON
+            escaped_prompt=$(echo "$prompt" | sed 's/"/\\"/g')
+            PROMPTS+="\"$escaped_prompt\","
+        done
+        PROMPTS="${PROMPTS%,}]"  # Remove trailing comma and close bracket
+    else
+        PROMPTS="[]"
+    fi
+    
+    # Convert contexts array to JSON  
+    if [ ${#CONTEXTS_ARRAY[@]} -gt 0 ]; then
+        RUNNER_CONTEXTS="["
+        for context in "${CONTEXTS_ARRAY[@]}"; do
+            if [[ "$context" == *":"* ]]; then
+                name="${context%%:*}"     # Everything before first :
+                path="${context#*:}"      # Everything after first :
+                RUNNER_CONTEXTS+="{\"name\":\"$name\",\"claudemd_path\":\"$path\"},"
+            else
+                echo "ERROR: Context format should be 'name:path', got: $context"
+                exit 1
+            fi
+        done
+        RUNNER_CONTEXTS="${RUNNER_CONTEXTS%,}]"  # Remove trailing comma and close bracket
+    else
+        RUNNER_CONTEXTS="[]"
+    fi
+    
+    # Set defaults
+    if [ -z "$MAX_PARALLEL" ]; then
+        MAX_PARALLEL=$NUM_RUNNERS
+    fi
+    CONFIG_TASK_NAME=""
+
+elif [ -f "$1" ]; then
     # Config file mode
     CONFIG_FILE="$1"
     
@@ -63,20 +164,15 @@ if [ -f "$1" ]; then
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
     RUNNER_CONTEXTS=$(jq -c '.runner_contexts // []' "$CONFIG_FILE")
+    TASK_NAME_ARG=""
+
 else
-    # Direct prompt mode - convert single prompt to array
-    SINGLE_PROMPT="$1"
-    PROMPTS="[\"$SINGLE_PROMPT\"]"  # Convert to JSON array
-    NUM_RUNNERS="${2:-3}"
-    TASK_NAME_ARG="${3:-}"
-    BASE_DIR="${4:-./results}"
-    # Defaults for direct mode - auto-scale parallelism
-    MAX_PARALLEL=$NUM_RUNNERS  # Run all in parallel by default
-    TEMPLATE_DIR=""
-    EXEC_MODE="parallel"
-    CONFIG_TASK_NAME=""
-    CONFIG_FILE=""
-    RUNNER_CONTEXTS="[]"
+    # Invalid usage - neither CLI flag nor config file
+    echo "ERROR: Invalid usage. First argument must be a flag (-p, -n, etc.) or a config file."
+    echo "Usage: $0 -p \"prompt1\" [\"prompt2\" ...] [options]"
+    echo "   or: $0 config.json"
+    echo "Use --help for detailed usage information"
+    exit 1
 fi
 
 # Set base directory to "./results" if not set
@@ -87,8 +183,9 @@ fi
 # Validate prompts
 if [ -z "$PROMPTS" ] || [ "$PROMPTS" = "[]" ]; then
     echo "ERROR: No prompts provided"
-    echo "Usage: $0 \"your prompt\" [num_runners] [TASK_NAME] [base_directory]"
+    echo "Usage: $0 -p \"prompt1\" [\"prompt2\" ...] [options]"
     echo "   or: $0 config.json (with 'prompts' array)"
+    echo "Use --help for detailed usage information"
     exit 1
 fi
 
@@ -298,7 +395,7 @@ run_parallel() {
     
     # Wait for all remaining jobs with progress
     echo "[Manager] All runners started. Waiting for completion..."
-    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/runner_*/output.log"
+    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/runner_*/prompt_*.log"
     
     local completed=0
     for pid in "${pids[@]}"; do
@@ -325,11 +422,14 @@ else
     # Create config from arguments
     cat > "$RUN_DIR/config.json" << EOF
 {
-  "prompt": "$PROMPT",
+  "prompts": $PROMPTS,
   "num_runners": $NUM_RUNNERS,
   "max_parallel": $MAX_PARALLEL,
-  "TASK_NAME": "$TASK_NAME",
-  "execution_mode": "$EXEC_MODE"
+  "task_name": "$TASK_NAME",
+  "base_directory": "$BASE_DIR",
+  "template_directory": "$TEMPLATE_DIR",
+  "execution_mode": "$EXEC_MODE",
+  "runner_contexts": $RUNNER_CONTEXTS
 }
 EOF
 fi
@@ -396,7 +496,7 @@ echo "├── runner_*/"
 echo "│   ├── info.txt             # Runner details"
 echo "│   ├── status.txt           # Status"
 echo "│   ├── timing.log           # Start/end times"
-echo "│   └── output.log           # Claude output"
+echo "│   └── prompt_*.log         # Claude output per prompt"
 echo "└── README.md                # Run summary with status table"
 echo ""
 echo "Index updated: $INDEX_FILE"
