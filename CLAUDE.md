@@ -2,9 +2,84 @@
 
 Multi-runner orchestration system for Claude CLI tasks using JSON configuration.
 
-## Project Purpose
+## Two Versions Available
 
-Orchestrates multiple Claude CLI instances working on the same task in parallel or sequentially, each with their own git worktree and branch. Supports runner-specific prompt modifications for comparing different approaches.
+### 1. **Full Version** (`multi-run.sh`)
+Complete orchestration with git worktrees, branches, looping, and prompt modifications.
+
+### 2. **Simple Version** (`multi-simple.sh`)  
+Lightweight runner for testing multiple Claude approaches without git complexity.
+
+---
+
+# Simple Version (`multi-simple.sh`)
+
+## Purpose
+Run the same prompt multiple times in parallel to compare different Claude approaches. No git, no loops, just parallel execution with optional template directories.
+
+## Quick Start
+
+```bash
+# Make executable
+chmod +x multi-simple.sh
+
+# Run with config
+./multi-simple.sh configs/simple/basic.json
+
+# Check progress
+watch "grep -H . runs/*/runner_*/status.txt"
+```
+
+## Simple Configuration
+
+```json
+{
+  "prompt": "Build a calculator web application",
+  "num_runners": 5,
+  "max_parallel": 3,
+  "base_directory": "./runs",
+  "template_directory": "./starter-app",
+  "execution_mode": "parallel"
+}
+```
+
+### Configuration Properties
+- `prompt` (required): The Claude prompt to execute
+- `num_runners`: Number of times to run (default: 3)
+- `max_parallel`: Max concurrent runs (default: 5)
+- `base_directory`: Output location (default: "./runs")
+- `template_directory`: Optional starter code to copy
+- `execution_mode`: "parallel" or "sequential" (default: "sequential")
+
+## Output Structure
+
+```
+runs/
+└── 20241125_143022/        # Timestamped run
+    ├── config.json          # Config used
+    ├── execution.log        # Overall timing
+    ├── runner_1/
+    │   ├── status.txt       # running/completed/failed
+    │   ├── timing.log       # Start/end times
+    │   ├── output.log       # Claude output
+    │   └── [template files] # If template used
+    └── runner_2/
+        └── ...
+```
+
+## Use Cases
+- **Compare approaches**: See how Claude solves the same problem differently
+- **Test consistency**: Verify response reliability
+- **Refactoring tests**: Start from template, compare refactoring strategies
+- **Bug fix approaches**: Multiple solutions to the same bug
+- **Performance testing**: Run many instances with controlled parallelism
+
+---
+
+# Full Version (`multi-run.sh`)
+
+## Purpose
+Complete orchestration with git worktrees, branches, looping, and runner-specific prompt modifications for complex multi-agent workflows.
 
 ## Prerequisites
 
@@ -25,7 +100,7 @@ chmod +x multi-run.sh
 tail -f logs/runner-name-log.log
 ```
 
-## Configuration Structure
+## Full Configuration Structure
 
 ```json
 {
