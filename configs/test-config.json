@@ -8,6 +8,6 @@
   "max_loops": 10,
   "initial_prompts": [],
   "loop_prompts": [],
-  "exit_conditions": [],
+  "loop_break_condition": null,
   "end_prompts": []
 }

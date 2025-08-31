@@ -56,20 +56,10 @@
       "period": 3
     }
   ],
-  "exit_conditions": [
-    {
-      "name": "error_detected",
-      "file": "design/error.log"
-    },
-    {
-      "name": "tasks_completed",
-      "file": "design/TASKS_DONE"
-    },
-    {
-      "name": "game_done",
-      "file": "design/GAME_DONE"
-    }
-  ],
+  "loop_break_condition": {
+    "name": "tasks_completed",
+    "file": "design/TASKS_DONE"
+  },
   "end_prompts": [
     {
       "name": "final_review",

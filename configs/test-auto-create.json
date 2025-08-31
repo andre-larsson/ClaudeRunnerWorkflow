@@ -1,0 +1,34 @@
+{
+  "task_name": "test_auto_create",
+  "task_description": "Test auto-creation of git project",
+  "git_project_path": "../test-new-project",
+  "git_base_branch": "develop",
+  "worktree_base_path": "worktrees",
+  "execution_mode": "sequential",
+  "max_loops": 1,
+  
+  "initial_prompts": [
+    {
+      "name": "verify_setup",
+      "prompt": "Check that git is working correctly. Create a test file and list the current directory contents."
+    }
+  ],
+  "loop_prompts": [
+    {
+      "name": "create_done_file",
+      "prompt": "Create design/TEST_DONE file to signal completion"
+    }
+  ],
+  "loop_break_condition": {
+    "name": "immediate_exit",
+    "file": "design/TEST_DONE"
+  },
+  "end_prompts": [
+  ],
+  
+  "runners": [
+    {
+      "name": "test_runner"
+    }
+  ]
+}

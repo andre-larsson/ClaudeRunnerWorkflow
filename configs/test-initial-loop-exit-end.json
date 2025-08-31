@@ -21,13 +21,10 @@
       "period": 1
     }
   ],
-  "exit_conditions": [
-    {
-      "file": "design/TEST_DONE",
-      "action": "exit",
-      "message": "Test completed successfully!"
-    }
-  ],
+  "loop_break_condition": {
+    "file": "design/TEST_DONE",
+    "name": "Test completed successfully!"
+  },
   "end_prompts": [
     {
       "name": "create_final_file",

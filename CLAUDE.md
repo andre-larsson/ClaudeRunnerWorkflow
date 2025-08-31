@@ -10,7 +10,7 @@ JSON-configurable bash script that orchestrates Claude CLI commands for iterativ
 
 - Claude CLI configured with `.claude/settings.json`
 - `jq` JSON processor (`brew install jq` / `sudo apt-get install jq`)
-- Git repository for target project
+- Git repository for target project (auto-created if doesn't exist)
 
 ## Quick Start
 
@@ -53,12 +53,10 @@ All config files should be saved in `configs/` directory. The JSON uses a flatte
       "period": 1
     }
   ],
-  "exit_conditions": [
-    {
-      "name": "done", 
-      "file": "design/COMPLETE"
-    }
-  ],
+  "loop_break_condition": {
+    "name": "done", 
+    "file": "design/COMPLETE"
+  },
   "end_prompts": [
     {
       "name": "finalize",
@@ -96,7 +94,7 @@ All config files should be saved in `configs/` directory. The JSON uses a flatte
 **Prompt Types:**
 - `initial_prompts`: Run once at start (supports `skip_condition`)
 - `loop_prompts`: Run repeatedly (supports `period` for frequency)
-- `exit_conditions`: File-based exit triggers (`name`, `file`)  
+- `loop_break_condition`: File-based exit trigger (`name`, `file`)  
 - `end_prompts`: Run once before exit
 
 **Runner Customization:**
@@ -150,9 +148,19 @@ project/
 
 ## Advanced Features
 
+- **Auto-creation**: Automatically creates git project directory and initializes repository if it doesn't exist
+- **Auto-branch setup**: Ensures the specified base branch exists and is checked out
 - **Skip conditions**: Bash conditions for initial prompts
 - **Period-based execution**: Loop prompts run every N iterations
 - **Rate limit handling**: Automatic retry with backoff
 - **Parallel/sequential modes**: Run runners simultaneously or one-by-one
 - **Flexible paths**: Relative/absolute paths for projects and worktrees
 - **Auto-commit**: Changes committed with context-rich messages
+
+### Git Project Auto-Creation
+
+The script automatically handles git project setup:
+- **Directory creation**: Creates `git_project_path` directory if it doesn't exist
+- **Git initialization**: Runs `git init` if the directory isn't a git repository
+- **Initial commit**: Creates a README.md and initial commit if repository is empty
+- **Base branch**: Ensures `git_base_branch` exists and is checked out (creates if needed)

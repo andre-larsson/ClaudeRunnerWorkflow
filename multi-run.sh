@@ -84,21 +84,58 @@ check_dependencies() {
         exit 1
     fi
     
-    # Check if git project directory exists
+    # Get git base branch from config
+    local git_base_branch=$(jq -r '.git_base_branch // "main"' "$MULTI_CONFIG_FILE")
+    
+    # Create git project directory if it doesn't exist
     if [ ! -d "$git_project_path" ]; then
-        echo "ERROR: Git project directory not found: $git_project_path"
-        echo "Please ensure the git project exists at the specified path."
-        exit 1
+        echo "Creating git project directory: $git_project_path"
+        mkdir -p "$git_project_path" || {
+            echo "ERROR: Failed to create directory: $git_project_path"
+            exit 1
+        }
     fi
     
-    # Check if it's a git repository
+    # Initialize git repository if it doesn't exist
     if ! (cd "$git_project_path" && git rev-parse --git-dir >/dev/null 2>&1); then
-        echo "ERROR: Directory is not a git repository: $git_project_path"
-        echo "Please initialize git in the project directory first."
-        exit 1
+        echo "Initializing git repository: $git_project_path"
+        (cd "$git_project_path" && git init) || {
+            echo "ERROR: Failed to initialize git repository"
+            exit 1
+        }
     fi
     
-    echo "Using git project at: $git_project_path"
+    # Ensure there's at least one commit (needed for branching)
+    if ! (cd "$git_project_path" && git rev-parse HEAD >/dev/null 2>&1); then
+        echo "Creating initial commit in: $git_project_path"
+        (cd "$git_project_path" && {
+            echo "# Initial repository" > README.md
+            git add README.md
+            git commit -m "Initial commit"
+        }) || {
+            echo "ERROR: Failed to create initial commit"
+            exit 1
+        }
+    fi
+    
+    # Ensure the base branch exists and is checked out
+    (cd "$git_project_path" && {
+        local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        if [ "$current_branch" != "$git_base_branch" ]; then
+            if git show-ref --quiet refs/heads/"$git_base_branch"; then
+                echo "Checking out existing base branch: $git_base_branch"
+                git checkout "$git_base_branch"
+            else
+                echo "Creating and checking out base branch: $git_base_branch"
+                git checkout -b "$git_base_branch"
+            fi
+        fi
+    }) || {
+        echo "ERROR: Failed to ensure base branch exists: $git_base_branch"
+        exit 1
+    }
+    
+    echo "Using git project at: $git_project_path (branch: $git_base_branch)"
 }
 
 # Generate random ID for unnamed runners
@@ -257,8 +294,8 @@ create_inline_runner_config() {
         loop_prompts:
           ( safe_prompts(.loop_prompts; $append_to_loop)
             + (.runners[$runner_index|tonumber].extra_prompts.loop_prompts // []) ),
-        exit_conditions:
-          ( (.exit_conditions // []) + (.runners[$runner_index|tonumber].extra_prompts.exit_conditions // []) ),
+        loop_break_condition:
+          ( .loop_break_condition // (.runners[$runner_index|tonumber].extra_prompts.loop_break_condition // null) ),
         end_prompts:
           ( safe_prompts(.end_prompts; $append_to_final)
             + (.runners[$runner_index|tonumber].extra_prompts.end_prompts // []) )
@@ -433,18 +470,18 @@ execute_runner_config() {
     while [ $COUNT -lt $max_loops ]; do
         echo "Iteration $COUNT"
         
-        # Check exit conditions first
-        local exit_conditions_count=$(jq -r '(.exit_conditions // []) | length' "$runner_config")
-        for ((i=0; i<exit_conditions_count; i++)); do
-            local file=$(jq -r ".exit_conditions[$i].file" "$runner_config")
-            local name=$(jq -r ".exit_conditions[$i].name" "$runner_config")
+        # Check exit condition first
+        local loop_break_condition=$(jq -r '.loop_break_condition // null' "$runner_config")
+        if [ "$loop_break_condition" != "null" ]; then
+            local file=$(jq -r '.loop_break_condition.file' "$runner_config")
+            local name=$(jq -r '.loop_break_condition.name // ""' "$runner_config")
             
             if [ -f "$file" ]; then
                 echo "Exit condition triggered: $name"
                 run_end_prompts "$runner_config" "$runner_name" "$worktree_path"
                 return 0
             fi
-        done
+        fi
         
         # Run loop prompts based on their period
         for ((i=0; i<loop_count; i++)); do
