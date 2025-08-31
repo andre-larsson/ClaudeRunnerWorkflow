@@ -87,9 +87,11 @@ validate_paths() {
         if [[ "$git_project_path" = /* ]]; then
             local git_parent_dir="$(dirname "$git_project_abs_path")"
             local git_project_name="$(basename "$git_project_abs_path")"
-            worktree_base_path="${git_parent_dir}/${git_project_name}-${worktree_base_path_config}"
+            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
         else
-            worktree_base_path="$(cd "$SCRIPT_DIR" && pwd)/$worktree_base_path_config"
+            # Git project is relative, create worktrees parallel to git project
+            local git_parent_dir="$(dirname "$git_project_abs_path")"
+            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
         fi
     fi
     
@@ -317,6 +319,26 @@ get_runner_config() {
     local runner_name="$2"
     local query="$3"
     
+    # If no runners defined, return base config without runner-specific modifications
+    local runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
+    if [ "$runner_count" -eq 0 ]; then
+        jq -r "
+        {
+          config: {
+            retry_attempts: 5,
+            retry_delay: 3600,
+            log_file: (\"logs/\" + \"$runner_name\" + \"-log.log\"),
+            error_file: (\"logs/\" + \"$runner_name\" + \"-error.log\")
+          },
+          max_loops: (.max_loops // 10),
+          initial_prompts: (.initial_prompts // []),
+          loop_prompts: (.loop_prompts // []),
+          loop_break_condition: (.loop_break_condition // null),
+          end_prompts: (.end_prompts // [])
+        } | $query" "$MULTI_CONFIG_FILE"
+        return
+    fi
+    
     local append_to_all
     append_to_all=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_all // \"\"" "$MULTI_CONFIG_FILE")
     local append_to_initial
@@ -484,6 +506,9 @@ execute_runner_config() {
     
     # Run initial prompts
     local initial_count=$(get_runner_config "$runner_index" "$runner_name" '(.initial_prompts // []) | length')
+    if [ "$initial_count" -eq 0 ]; then
+        echo "No initial prompts defined. Proceeding to main loop."
+    fi
     for ((i=0; i<initial_count; i++)); do
         local name=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].name")
         local prompt=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].prompt")
@@ -573,6 +598,9 @@ run_end_prompts() {
     local worktree_path="$3"
     
     local end_count=$(get_runner_config "$runner_index" "$runner_name" '(.end_prompts // []) | length')
+    if [ "$end_count" -eq 0 ]; then
+        echo "No end prompts defined. Task completed."
+    fi
     for ((i=0; i<end_count; i++)); do
         local name=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].name")
         local prompt=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].prompt")
@@ -608,10 +636,19 @@ run_task_runner() {
     }
     
     # Copy the main config file to worktree so get_runner_config can access it
-    cp "$SCRIPT_DIR/$MULTI_CONFIG_FILE" ./ || {
-        echo "ERROR: Failed to copy main config to worktree"
-        return 1
-    }
+    if [[ "$MULTI_CONFIG_FILE" == /* ]]; then
+        # Absolute path (temp file), use as-is
+        cp "$MULTI_CONFIG_FILE" ./ || {
+            echo "ERROR: Failed to copy main config to worktree"
+            return 1
+        }
+    else
+        # Relative path, prepend SCRIPT_DIR
+        cp "$SCRIPT_DIR/$MULTI_CONFIG_FILE" ./ || {
+            echo "ERROR: Failed to copy main config to worktree"
+            return 1
+        }
+    fi
     
     if [ "$timeout" -gt 0 ]; then
         timeout "$timeout" bash -c "$(declare -f execute_runner_config run_claude_with_retry run_end_prompts auto_commit_changes clean_git_commands_from_prompt GET_ALLOWED_TOOLS get_runner_config); MULTI_CONFIG_FILE='$(basename "$MULTI_CONFIG_FILE")'; execute_runner_config '$runner_index' '$runner_name' '$worktree_path'" || {
@@ -657,8 +694,9 @@ run_task() {
             local git_project_name="$(basename "$git_project_path")"
             worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
         else
-            # Git project is relative, use relative worktree path
-            worktree_base_path="$worktree_base_path_config"
+            # Git project is relative, create worktrees parallel to git project
+            local git_parent_dir="$(dirname "$(realpath "$git_project_path")")"
+            worktree_base_path="${git_parent_dir}/${worktree_base_path_config}"
         fi
     fi
     
@@ -675,13 +713,26 @@ run_task() {
     local runners=()
     local runner_configs=()
     
+    # Check if we have actual runners defined or need to use default
+    local actual_runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
+    
     for ((i=0; i<runner_count; i++)); do
-        local runner_name=$(jq -r ".runners[$i].name // empty" "$MULTI_CONFIG_FILE")
-        local extra_instructions=$(jq -r ".runners[$i].extra_instructions // \"\"" "$MULTI_CONFIG_FILE")
+        local runner_name
+        local extra_instructions
         
-        # Generate random name if not provided
-        if [ -z "$runner_name" ]; then
-            runner_name="runner_$(generate_random_id)"
+        if [ "$actual_runner_count" -eq 0 ]; then
+            # No runners defined - use default
+            runner_name="default"
+            extra_instructions=""
+        else
+            # Use defined runners
+            runner_name=$(jq -r ".runners[$i].name // empty" "$MULTI_CONFIG_FILE")
+            extra_instructions=$(jq -r ".runners[$i].extra_instructions // \"\"" "$MULTI_CONFIG_FILE")
+            
+            # Generate random name if not provided
+            if [ -z "$runner_name" ]; then
+                runner_name="runner_$(generate_random_id)"
+            fi
         fi
         
         local worktree_path="${worktree_base_path}/${task_name}_${runner_name}"
@@ -751,17 +802,33 @@ main() {
         exit 1
     fi
     
-    # Check if task_name exists
+    # Check if task_name exists - generate random one if missing
     if ! jq -e '.task_name' "$MULTI_CONFIG_FILE" >/dev/null 2>&1; then
-        echo "No task_name found in configuration"
-        exit 1
+        echo "No task_name found - generating random task name"
+        local random_task_name="task_$(generate_random_id)"
+        # Create a temporary config with the generated task name
+        local temp_config=$(mktemp)
+        jq ". + {task_name: \"$random_task_name\"}" "$MULTI_CONFIG_FILE" > "$temp_config"
+        MULTI_CONFIG_FILE="$temp_config"
+        echo "Generated task name: $random_task_name"
     fi
     
-    # Check if runners exist
+    # Check if runners exist - now we allow zero runners with default behavior
     local runner_count=$(jq -r '(.runners // []) | length' "$MULTI_CONFIG_FILE")
     if [ "$runner_count" -eq 0 ]; then
-        echo "No runners found in configuration"
-        exit 1
+        echo "No runners found - using default runner behavior"
+        # If we already have a temp config, update it, otherwise create one
+        if [[ "$MULTI_CONFIG_FILE" == /tmp/* ]]; then
+            # Already using temp config, just update it
+            local temp_config="$MULTI_CONFIG_FILE"
+            jq '. + {runners: [{name: "default"}]}' "$temp_config" > "${temp_config}.new" && mv "${temp_config}.new" "$temp_config"
+        else
+            # Create new temp config with default runner
+            local temp_config=$(mktemp)
+            jq '. + {runners: [{name: "default"}]}' "$MULTI_CONFIG_FILE" > "$temp_config"
+            MULTI_CONFIG_FILE="$temp_config"
+        fi
+        runner_count=1
     fi
     
     echo "Found task with $runner_count runner(s)"

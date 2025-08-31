@@ -1,6 +1,9 @@
 {
-  "task": {
-  },
-  "git_project_path": "../git-project",
-  "runners": [{"name": "test"}]
+  "initial_prompts": [
+    {
+      "name": "create_test_file",
+      "prompt": "Create a test file called test.txt and exit."
+    }
+  ],
+  "git_project_path": "../git-project"
 }
