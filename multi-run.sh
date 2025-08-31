@@ -235,27 +235,13 @@ create_runner_worktree() {
 }
 
 # Create runner configuration by merging common prompts with runner-specific settings
-create_runner_config() {
-    local task_index="$1"
-    local task_name="$2"
-    local runner_name="$3"
-    local runner_index="$4"
-    local runner_config_path="$5"
-    
-    echo "Creating runner config: $runner_config_path"
-    
-    # Create config from inline common prompts + runner modifications
-    create_inline_runner_config "$task_index" "$task_name" "$runner_name" "$runner_index" "$runner_config_path"
-}
 
-# Create runner config from inline common prompts
-create_inline_runner_config() {
-    local task_index="$1"
-    local task_name="$2"
-    local runner_name="$3"
-    local runner_index="$4"
-    local runner_config_path="$5"
-
+# Dynamic config helper function - generates runner config on-the-fly
+get_runner_config() {
+    local runner_index="$1"
+    local runner_name="$2"
+    local query="$3"
+    
     local append_to_all
     append_to_all=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_all // \"\"" "$MULTI_CONFIG_FILE")
     local append_to_initial
@@ -265,7 +251,7 @@ create_inline_runner_config() {
     local append_to_final
     append_to_final=$(jq -r ".runners[$runner_index].prompt_modifications.append_to_final // \"\"" "$MULTI_CONFIG_FILE")
 
-    jq \
+    jq -r \
       --arg runner_index "$runner_index" \
       --arg runner_name "$runner_name" \
       --arg append_to_all "$append_to_all" \
@@ -299,11 +285,8 @@ create_inline_runner_config() {
         end_prompts:
           ( safe_prompts(.end_prompts; $append_to_final)
             + (.runners[$runner_index|tonumber].extra_prompts.end_prompts // []) )
-      }
-      ' "$MULTI_CONFIG_FILE" > "$runner_config_path" || {
-        echo "ERROR: Failed to generate $runner_config_path from $MULTI_CONFIG_FILE"
-        exit 1
-      }
+      } | '"$query"'
+      ' "$MULTI_CONFIG_FILE"
 }
 
 
@@ -318,7 +301,7 @@ auto_commit_changes() {
     local runner_name="$1"
     local iteration="$2"
     local worktree_path="$3"
-    local runner_config="$4"
+    local runner_index="$4"
     local claude_output="$5"
     local prompt_type="$6"
     local original_prompt="$7"
@@ -367,7 +350,7 @@ clean_git_commands_from_prompt() {
 # Claude execution with retry logic and auto-commit
 run_claude_with_retry() {
     local prompt="$1"
-    local runner_config="$2"
+    local runner_index="$2"
     local runner_name="$3"
     local iteration="$4"
     local worktree_path="$5"
@@ -375,7 +358,7 @@ run_claude_with_retry() {
     
     local max_attempts=5
     local retry_delay=3600
-    local log_file=$(jq -r '.log_file // "logs/log.log"' "$runner_config")
+    local log_file=$(get_runner_config "$runner_index" "$runner_name" '.config.log_file // "logs/log.log"')
     local allowed_tools=$(GET_ALLOWED_TOOLS)
     local attempt=1
     
@@ -396,7 +379,7 @@ run_claude_with_retry() {
         
         # Auto-commit changes if command succeeded
         if [ $exit_code -eq 0 ] && [ -n "$worktree_path" ]; then
-            auto_commit_changes "$runner_name" "$iteration" "$worktree_path" "$runner_config" "$output" "$prompt_type" "$prompt"
+            auto_commit_changes "$runner_name" "$iteration" "$worktree_path" "$runner_index" "$output" "$prompt_type" "$prompt"
         fi
         
         # Check if output contains "limit reached"
@@ -418,18 +401,18 @@ run_claude_with_retry() {
 
 # Execute prompts from config (integrated logic from run.sh)
 execute_runner_config() {
-    local runner_config="$1"
+    local runner_index="$1"
     local runner_name="$2"
     local worktree_path="$3"
     
-    echo "Executing runner config: $runner_config"
+    echo "Executing runner config for: $runner_name (index: $runner_index)"
     
     # Run initial prompts
-    local initial_count=$(jq -r '(.initial_prompts // []) | length' "$runner_config")
+    local initial_count=$(get_runner_config "$runner_index" "$runner_name" '(.initial_prompts // []) | length')
     for ((i=0; i<initial_count; i++)); do
-        local name=$(jq -r ".initial_prompts[$i].name" "$runner_config")
-        local prompt=$(jq -r ".initial_prompts[$i].prompt" "$runner_config")
-        local skip_condition=$(jq -r ".initial_prompts[$i].skip_condition // null" "$runner_config")
+        local name=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].name")
+        local prompt=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].prompt")
+        local skip_condition=$(get_runner_config "$runner_index" "$runner_name" ".initial_prompts[$i].skip_condition // null")
         
         if [ "$skip_condition" != "null" ] && [ -n "$skip_condition" ]; then
             if eval "$skip_condition"; then
@@ -439,7 +422,7 @@ execute_runner_config() {
         fi
         
         echo "Running initial prompt: $name"
-        if ! run_claude_with_retry "$prompt" "$runner_config" "$runner_name" "initial_$i" "$worktree_path" "initial"; then
+        if ! run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "initial_$i" "$worktree_path" "initial"; then
             echo "Failed to complete initial prompt '$name'. Exiting runner."
             return 1
         fi
@@ -453,16 +436,16 @@ execute_runner_config() {
     
     # Main loop
     local COUNT=0
-    local loop_count=$(jq -r '(.loop_prompts // []) | length' "$runner_config")
+    local loop_count=$(get_runner_config "$runner_index" "$runner_name" '(.loop_prompts // []) | length')
     
     # Skip main loop if there are no loop prompts
     if [ "$loop_count" -eq 0 ]; then
         echo "No loop prompts defined. Skipping main loop and proceeding to end prompts."
-        run_end_prompts "$runner_config" "$runner_name" "$worktree_path"
+        run_end_prompts "$runner_index" "$runner_name" "$worktree_path"
         return 0
     fi
     
-    local max_loops=$(jq -r '.max_loops // 10' "$runner_config")
+    local max_loops=$(get_runner_config "$runner_index" "$runner_name" '.max_loops // 10')
     # Ensure max_loops is a valid integer
     if ! [[ "$max_loops" =~ ^[0-9]+$ ]]; then
         max_loops=10
@@ -471,23 +454,23 @@ execute_runner_config() {
         echo "Iteration $COUNT"
         
         # Check exit condition first
-        local loop_break_condition=$(jq -r '.loop_break_condition // null' "$runner_config")
+        local loop_break_condition=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition // null')
         if [ "$loop_break_condition" != "null" ]; then
-            local file=$(jq -r '.loop_break_condition.file' "$runner_config")
-            local name=$(jq -r '.loop_break_condition.name // ""' "$runner_config")
+            local file=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition.file')
+            local name=$(get_runner_config "$runner_index" "$runner_name" '.loop_break_condition.name // ""')
             
             if [ -f "$file" ]; then
                 echo "Exit condition triggered: $name"
-                run_end_prompts "$runner_config" "$runner_name" "$worktree_path"
+                run_end_prompts "$runner_index" "$runner_name" "$worktree_path"
                 return 0
             fi
         fi
         
         # Run loop prompts based on their period
         for ((i=0; i<loop_count; i++)); do
-            local name=$(jq -r ".loop_prompts[$i].name" "$runner_config")
-            local prompt=$(jq -r ".loop_prompts[$i].prompt" "$runner_config")
-            local period=$(jq -r ".loop_prompts[$i].period // 1" "$runner_config")
+            local name=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].name")
+            local prompt=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].prompt")
+            local period=$(get_runner_config "$runner_index" "$runner_name" ".loop_prompts[$i].period // 1")
             
             # Handle null or empty period
             if [ "$period" = "null" ] || [ -z "$period" ] || ! [[ "$period" =~ ^[0-9]+$ ]]; then
@@ -497,7 +480,7 @@ execute_runner_config() {
             # Check if this prompt should run on this iteration
             if [ $((COUNT % period)) -eq 0 ]; then
                 echo "Running loop prompt: $name (period: $period)"
-                if ! run_claude_with_retry "$prompt" "$runner_config" "$runner_name" "loop_${COUNT}_${i}" "$worktree_path" "loop"; then
+                if ! run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "loop_${COUNT}_${i}" "$worktree_path" "loop"; then
                     echo "Failed to complete loop prompt '$name'. Exiting runner."
                     return 1
                 fi
@@ -510,17 +493,17 @@ execute_runner_config() {
 
 # Run end prompts
 run_end_prompts() {
-    local runner_config="$1"
+    local runner_index="$1"
     local runner_name="$2"
     local worktree_path="$3"
     
-    local end_count=$(jq -r '(.end_prompts // []) | length' "$runner_config")
+    local end_count=$(get_runner_config "$runner_index" "$runner_name" '(.end_prompts // []) | length')
     for ((i=0; i<end_count; i++)); do
-        local name=$(jq -r ".end_prompts[$i].name" "$runner_config")
-        local prompt=$(jq -r ".end_prompts[$i].prompt" "$runner_config")
+        local name=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].name")
+        local prompt=$(get_runner_config "$runner_index" "$runner_name" ".end_prompts[$i].prompt")
         
         echo "Running end prompt: $name"
-        run_claude_with_retry "$prompt" "$runner_config" "$runner_name" "end_$i" "$worktree_path" "final"
+        run_claude_with_retry "$prompt" "$runner_index" "$runner_name" "end_$i" "$worktree_path" "final"
     done
 }
 
@@ -529,13 +512,13 @@ run_task_runner() {
     local task_name="$1"
     local runner_name="$2"
     local worktree_path="$3"
-    local runner_config="$4"
+    local runner_index="$4"
     local timeout="$5"
     
     echo "========================================="
     echo "Starting runner: $runner_name"
     echo "Worktree: $worktree_path"
-    echo "Config: $runner_config"
+    echo "Runner Index: $runner_index"
     echo "========================================="
     
     cd "$worktree_path" || {
@@ -549,15 +532,14 @@ run_task_runner() {
         return 1
     }
     
-    # Copy runner config to worktree
-    cp "$SCRIPT_DIR/$runner_config" ./ || {
-        echo "ERROR: Failed to copy runner config to worktree"
+    # Copy the main config file to worktree so get_runner_config can access it
+    cp "$SCRIPT_DIR/$MULTI_CONFIG_FILE" ./ || {
+        echo "ERROR: Failed to copy main config to worktree"
         return 1
     }
     
-    # Execute the runner config directly (no dependency on run.sh)
     if [ "$timeout" -gt 0 ]; then
-        timeout "$timeout" bash -c "$(declare -f execute_runner_config run_claude_with_retry run_end_prompts auto_commit_changes clean_git_commands_from_prompt GET_ALLOWED_TOOLS); execute_runner_config '$runner_config' '$runner_name' '$worktree_path'" || {
+        timeout "$timeout" bash -c "$(declare -f execute_runner_config run_claude_with_retry run_end_prompts auto_commit_changes clean_git_commands_from_prompt GET_ALLOWED_TOOLS get_runner_config); MULTI_CONFIG_FILE='$(basename "$MULTI_CONFIG_FILE")'; execute_runner_config '$runner_index' '$runner_name' '$worktree_path'" || {
             local exit_code=$?
             if [ $exit_code -eq 124 ]; then
                 echo "Runner $runner_name timed out after $timeout seconds"
@@ -567,7 +549,7 @@ run_task_runner() {
             return $exit_code
         }
     else
-        execute_runner_config "$runner_config" "$runner_name" "$worktree_path" || {
+        execute_runner_config "$runner_index" "$runner_name" "$worktree_path" || {
             echo "Runner $runner_name failed with exit code: $?"
             return $?
         }
@@ -628,7 +610,6 @@ run_task() {
         fi
         
         local worktree_path="${worktree_base_path}/${task_name}_${runner_name}"
-        local runner_config_name="${runner_name}-config.json"
         
         # Convert worktree path to absolute path if relative
         if [[ ! "$worktree_path" = /* ]]; then
@@ -644,10 +625,7 @@ run_task() {
         # Create worktree and branch
         create_runner_worktree "$task_name" "$runner_name" "$worktree_path"
         
-        # Create runner-specific config
-        create_runner_config "0" "$task_name" "$runner_name" "$i" "$runner_config_name"
-        
-        runners+=("$runner_name:$worktree_path:$runner_config_name")
+        runners+=("$runner_name:$worktree_path:$i")
     done
     
     # Execute runners based on execution mode
@@ -656,8 +634,8 @@ run_task() {
         local pids=()
         
         for runner_info in "${runners[@]}"; do
-            IFS=':' read -r runner_name worktree_path runner_config <<< "$runner_info"
-            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_config" "$timeout" &
+            IFS=':' read -r runner_name worktree_path runner_index <<< "$runner_info"
+            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_index" "$timeout" &
             local pid=$!
             pids+=($pid)
             BACKGROUND_PIDS+=($pid)
@@ -678,8 +656,8 @@ run_task() {
     else
         echo "Running $runner_count runners sequentially..."
         for runner_info in "${runners[@]}"; do
-            IFS=':' read -r runner_name worktree_path runner_config <<< "$runner_info"
-            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_config" "$timeout"
+            IFS=':' read -r runner_name worktree_path runner_index <<< "$runner_info"
+            run_task_runner "$task_name" "$runner_name" "$worktree_path" "$runner_index" "$timeout"
         done
     fi
     
