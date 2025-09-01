@@ -470,6 +470,8 @@ context_description_from_prompts() {
         # Pick a random approach (using process substitution for randomness)
         local random_index=$((RANDOM % ${#randomizers[@]}))
         meta_prompt+="\n\nRandomization hint: ${randomizers[$random_index]}"
+
+        echo "DEBUG: Randomization hint: ${randomizers[$random_index]}"
     fi
     
     meta_prompt+="\n\nFocus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect', 'Chaos engineer', 'Documentation obsessive', 'Legacy system archaeologist'. Return only the description."

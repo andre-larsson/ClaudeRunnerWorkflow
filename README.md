@@ -20,7 +20,7 @@ A task can consist of multiple prompts, carried out in sequence.
 
 - In order for the tool to work, Claude is given a substantial amount of permissions
 - Permissions include: internet access, file system access, etc.
-- Use at your own risk.
+- Permissions are sent to claude via --allowedTools flag, which overrides ./claude/settings.json. Run at your own risk.
 - Better to write your own scripts to run Claude, to know what it is doing.
 
 
@@ -205,8 +205,8 @@ See `generate-contexts.sh --help` and `claude-runner.sh --help` for available pa
 
 ## Notes
 
-- Permissions are sent to claude via --allowedTools flag, which overrides ./claude/settings.json. Run at your own risk.
-- If you have Claude Code with a subscription, you might of course run into a rate-limit if you spawn enough runners.
+- If you have Claude Code with a subscription, you will of course eventually run into the rate-limit if you spawn enough runners.
 - If this happens, claude-runner will wait for one hour and try again, five times, for each prompt, meaning your task should eventually complete, even if it takes a while.
 - I'm not using git for version control of the runs, even though I imagine it would have been very useful. Unfortunately I found git+claude to be very buggy both in interactive and non-interactive mode. Permissions seem to be ignored, with claude just refusing to call git, when they work fine for other tools. Could be that claude code has their own git integration and github actions app, and this clashes with standard git in terminal window, or other way around? Pure speculation, might just be my configuration is wrong somewhere.
 - This project was of course written with the help of claude code, guided by a human hand (promise).
+- claude-runner.sh can start claude instances either in parallel or sequential, while generate-contexts.sh runs everything after each other.

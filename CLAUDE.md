@@ -32,8 +32,6 @@ echo '{"prompts": ["Create file file1.txt with ASCII art"], "num_runners": 3}' >
   "task_name": "calculator-app",
   "execution_mode": "parallel",
   "max_parallel": 2,
-  "max_retries": 5,
-  "retry_delay": 3600,
   "project_template": "./my_project",
   "base_directory": "./results", 
   "runner_contexts": [
@@ -52,8 +50,6 @@ echo '{"prompts": ["Create file file1.txt with ASCII art"], "num_runners": 3}' >
 - **`num_runners`** - Number of parallel instances (default: 1)
 - **`execution_mode`** - "parallel" or "sequential" (default: parallel)
 - **`max_parallel`** - Limit simultaneous runs
-- **`max_retries`** - Max retry attempts for rate limits (default: 5)
-- **`retry_delay`** - Seconds to wait between retries (default: 3600)
 - **`project_template`** - Copy from existing directory
 - **`base_directory`** - Output directory (default: ./results)
 - **`runner_contexts`** - Auto-generated random contexts if not provided
@@ -118,16 +114,27 @@ Results in directories like:
 - Claude CLI installed and configured
 - `jq` JSON processor (`brew install jq` / `sudo apt-get install jq`)
 
-## Rate Limit Handling
+## Built-in Resilience Features
 
-If you have Claude Code with a subscription, you might run into rate limits when spawning multiple runners. The system automatically handles this by:
+The system includes automatic handling for common issues:
 
-- Detecting rate limit messages in Claude output
-- Waiting 1 hour (configurable) before retrying
-- Attempting up to 5 retries (configurable) per prompt
-- Your tasks should eventually complete, even if they take longer
+**Rate Limit Handling:**
+- Detects rate limit messages in Claude output
+- Automatically waits 1 hour before retrying (configurable)
+- Attempts up to 5 retries per prompt (configurable)
+- Tasks eventually complete even with rate limits
 
-Configure retry behavior with `max_retries` and `retry_delay` options.
+**Worker Spawn Management:**
+- 3-second delay between spawning workers (configurable)
+- Prevents system overload during startup
+
+**Customization:**
+Edit the constants at the top of `claude-runner.sh`:
+```bash
+DEFAULT_MAX_RETRIES=5          # Max retry attempts for rate limits
+DEFAULT_RETRY_DELAY=3600       # Seconds to wait between retries (1 hour)
+WORKER_SPAWN_DELAY=3           # Seconds to wait between spawning workers
+```
 
 ## Security Warning
 

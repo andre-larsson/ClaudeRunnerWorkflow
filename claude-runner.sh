@@ -4,6 +4,11 @@
 
 set -e
 
+# Configuration - easily adjustable by users
+DEFAULT_MAX_RETRIES=5          # Max retry attempts for rate limits
+DEFAULT_RETRY_DELAY=3600       # Seconds to wait between retries (1 hour)
+WORKER_SPAWN_DELAY=3           # Seconds to wait between spawning workers
+
 # Help message
 if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ $# -eq 0 ]; then
     cat << EOF
@@ -19,8 +24,6 @@ Command Line Options:
   --template-directory PATH      Template directory to copy
   -c, --runner-context "name:path"  Runner context (can repeat)
   -e, --execution-mode MODE      parallel|sequential (default: parallel)
-  --max-retries N                Max retry attempts for rate limits (default: 5)
-  --retry-delay N                Seconds to wait between retries (default: 3600)
 
 Examples:
   # Single prompt via CLI:
@@ -41,8 +44,6 @@ Config File Format:
     "prompts": ["Prompt 1", "Prompt 2"],
     "num_runners": 3,
     "max_parallel": 2,
-    "max_retries": 5,
-    "retry_delay": 3600,
     "runner_contexts": [
       {"name": "security", "claudemd_file": "runner-contexts/security/CLAUDE.md"}
     ]
@@ -64,8 +65,6 @@ if [[ "$1" == -* ]]; then
     BASE_DIR="./results"
     TEMPLATE_DIR=""
     EXEC_MODE="parallel"
-    MAX_RETRIES=5
-    RETRY_DELAY=3600
     CONFIG_FILE=""
     
     while [[ $# -gt 0 ]]; do
@@ -104,14 +103,6 @@ if [[ "$1" == -* ]]; then
                 ;;
             -e|--execution-mode)
                 EXEC_MODE="$2"
-                shift 2
-                ;;
-            --max-retries)
-                MAX_RETRIES="$2"
-                shift 2
-                ;;
-            --retry-delay)
-                RETRY_DELAY="$2"
                 shift 2
                 ;;
             *)
@@ -178,8 +169,6 @@ elif [ -f "$1" ]; then
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
     RUNNER_CONTEXTS=$(jq -c '.runner_contexts // []' "$CONFIG_FILE")
-    MAX_RETRIES=$(jq -r '.max_retries // 5' "$CONFIG_FILE")
-    RETRY_DELAY=$(jq -r '.retry_delay // 3600' "$CONFIG_FILE")
     TASK_NAME_ARG=""
 
 else
@@ -481,7 +470,7 @@ run_claude() {
             echo "=== OUTPUT ===" >> "$log_file"
             
             # Run Claude for this prompt with retry logic
-            run_claude_with_retry "$current_prompt" "$log_file" "$runner_num" "$MAX_RETRIES" "$RETRY_DELAY"
+            run_claude_with_retry "$current_prompt" "$log_file" "$runner_num" "$DEFAULT_MAX_RETRIES" "$DEFAULT_RETRY_DELAY"
             exit_code=$?
             
             echo "$(date): Prompt $prompt_num completed (exit: $exit_code)" >> timing.log
@@ -539,8 +528,8 @@ run_parallel() {
         pids+=($new_pid)
         echo "[Manager] Started runner $i (PID: $new_pid)"
         
-        # Small delay to avoid race conditions
-        sleep 1
+        # Wait between spawning workers to avoid overwhelming the system
+        sleep $WORKER_SPAWN_DELAY
     done
     
     # Wait for all remaining jobs with progress
@@ -579,8 +568,6 @@ else
   "base_directory": "$BASE_DIR",
   "project_template": "$TEMPLATE_DIR",
   "execution_mode": "$EXEC_MODE",
-  "max_retries": $MAX_RETRIES,
-  "retry_delay": $RETRY_DELAY,
   "runner_contexts": $RUNNER_CONTEXTS
 }
 EOF
@@ -632,11 +619,11 @@ echo ""
 echo "Runner Status:"
 for i in $(seq 1 "$NUM_RUNNERS"); do
     # Get context name for directory lookup
-    local context_name=""
+    context_name=""
     if [ "$RUNNER_CONTEXTS" != "[]" ] && [ "$RUNNER_CONTEXTS" != "null" ]; then
-        local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
+        contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
         if [ "$contexts_count" -gt 0 ]; then
-            local context_index=$(( (i - 1) % contexts_count ))
+            context_index=$(( (i - 1) % contexts_count ))
             context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].name // \"context_$context_index\"")
         else
             context_name="default"
@@ -645,8 +632,8 @@ for i in $(seq 1 "$NUM_RUNNERS"); do
         context_name="default"
     fi
     
-    local runner_padded=$(printf "%05d" $i)
-    local runner_dir_name="${runner_padded}_${context_name}"
+    runner_padded=$(printf "%05d" $i)
+    runner_dir_name="${runner_padded}_${context_name}"
     status_file="$RUN_DIR/$runner_dir_name/status.txt"
     if [ -f "$status_file" ]; then
         status=$(cat "$status_file")
