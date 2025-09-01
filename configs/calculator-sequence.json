@@ -6,8 +6,7 @@
     "Add advanced features like keyboard support, decimal point handling, and basic error checking for division by zero"
   ],
   "num_runners": 3,
-  "max_parallel": 2,
+  "max_parallel": 1,
   "base_directory": "./results",
-  "task_name": "calculator-sequence",
-  "execution_mode": "parallel"
+  "task_name": "calculator-sequence"
 }

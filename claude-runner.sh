@@ -23,13 +23,12 @@ Command Line Options:
   -b, --base-directory PATH      Base output directory (default: ./results)
   --template-directory PATH      Template directory to copy
   -c, --runner-context "name:path"  Runner context (can repeat)
-  -e, --execution-mode MODE      parallel|sequential (default: parallel)
 
 Examples:
   # Single prompt via CLI:
   $0 -p "Create a calculator app" -n 3
   
-  # Multiple prompts via CLI:
+  # Multiple prompts via CLI (sequential):
   $0 -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
   
   # With contexts:
@@ -64,7 +63,6 @@ if [[ "$1" == -* ]]; then
     TASK_NAME_ARG=""
     BASE_DIR="./results"
     TEMPLATE_DIR=""
-    EXEC_MODE="parallel"
     CONFIG_FILE=""
     
     while [[ $# -gt 0 ]]; do
@@ -99,10 +97,6 @@ if [[ "$1" == -* ]]; then
                 ;;
             -c|--runner-context)
                 CONTEXTS_ARRAY+=("$2")
-                shift 2
-                ;;
-            -e|--execution-mode)
-                EXEC_MODE="$2"
                 shift 2
                 ;;
             *)
@@ -165,7 +159,6 @@ elif [ -f "$1" ]; then
     # Auto-scale parallelism - default to num_runners unless specified
     MAX_PARALLEL=$(jq -r '.max_parallel // '$NUM_RUNNERS "$CONFIG_FILE")
     TEMPLATE_DIR=$(jq -r '.project_template // ""' "$CONFIG_FILE")
-    EXEC_MODE=$(jq -r '.execution_mode // "parallel"' "$CONFIG_FILE")
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
     RUNNER_CONTEXTS=$(jq -c '.runner_contexts // []' "$CONFIG_FILE")
@@ -283,8 +276,8 @@ run_claude_with_retry() {
     local attempt=1
     while [ $attempt -le $max_attempts ]; do
         echo "=== ATTEMPT $attempt ===" >> "$log_file"
-        echo "$(date): Starting attempt $attempt" >> "$log_file"
-        echo "[Runner $runner_num] Attempt $attempt/$max_attempts"
+        echo "$(date): Starting run_claude_with_retry attempt $attempt" >> "$log_file"
+        echo "[Runner $runner_num] run_claude_with_retry_attempt $attempt/$max_attempts" >> "$log_file"
         
         # Execute Claude with timeout
         local output
@@ -544,12 +537,6 @@ run_parallel() {
     done
 }
 
-# Sequential execution  
-run_sequential() {
-    for i in $(seq 1 "$NUM_RUNNERS"); do
-        run_claude $i
-    done
-}
 
 # Main execution
 mkdir -p "$RUN_DIR"
@@ -567,7 +554,6 @@ else
   "task_name": "$TASK_NAME",
   "base_directory": "$BASE_DIR",
   "project_template": "$TEMPLATE_DIR",
-  "execution_mode": "$EXEC_MODE",
   "runner_contexts": $RUNNER_CONTEXTS
 }
 EOF
@@ -577,14 +563,13 @@ fi
 # Record start time
 echo "Start time: $(date)" | tee "$RUN_DIR/execution.log"
 
-# Execute based on mode
-if [ "$EXEC_MODE" = "parallel" ]; then
-    echo "Running in parallel mode (max $MAX_PARALLEL concurrent)"
-    run_parallel
+# Execute in parallel mode (max_parallel=1 for sequential behavior)
+if [ "$MAX_PARALLEL" -eq 1 ]; then
+    echo "Running sequentially (max_parallel=1)"
 else
-    echo "Running in sequential mode"
-    run_sequential
+    echo "Running in parallel mode (max $MAX_PARALLEL concurrent)"
 fi
+run_parallel
 
 # Record end time
 echo "End time: $(date)" | tee -a "$RUN_DIR/execution.log"

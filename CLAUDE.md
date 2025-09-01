@@ -30,7 +30,6 @@ echo '{"prompts": ["Create file file1.txt with ASCII art"], "num_runners": 3}' >
   "prompts": ["Create calculator", "Add styling", "Add tests"],
   "num_runners": 3,
   "task_name": "calculator-app",
-  "execution_mode": "parallel",
   "max_parallel": 2,
   "project_template": "./my_project",
   "base_directory": "./results", 
@@ -48,8 +47,7 @@ echo '{"prompts": ["Create file file1.txt with ASCII art"], "num_runners": 3}' >
 **Optional Fields:**
 - **`task_name`** - Auto-generated from prompts if not provided
 - **`num_runners`** - Number of parallel instances (default: 1)
-- **`execution_mode`** - "parallel" or "sequential" (default: parallel)
-- **`max_parallel`** - Limit simultaneous runs
+- **`max_parallel`** - Limit simultaneous runs (default: num_runners, use 1 for sequential)
 - **`project_template`** - Copy from existing directory
 - **`base_directory`** - Output directory (default: ./results)
 - **`runner_contexts`** - Auto-generated random contexts if not provided
@@ -74,7 +72,7 @@ echo '{
 ./generate-and-run.sh calculator.json
 ```
 
-### Multi-Prompt Workflow
+### Multi-Prompt Workflow (Sequential)
 ```bash
 echo '{
   "prompts": [
@@ -83,6 +81,7 @@ echo '{
     "Write unit tests"
   ],
   "num_runners": 3,
+  "max_parallel": 1,
   "runner_contexts": ["TDD approach", "defensive programming"]
 }' > multi-step.json
 

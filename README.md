@@ -10,7 +10,7 @@ A task can consist of multiple prompts, carried out in sequence.
 - `jq` JSON processor
 
 
-## Tools
+## Overview
 
 - **generate-contexts.sh** - Generate CLAUDE.md context files for runners from config file
 - **claude-runner.sh** - Run parallel Claude instances from config file
@@ -23,13 +23,37 @@ A task can consist of multiple prompts, carried out in sequence.
 - Permissions are sent to claude via --allowedTools flag, which overrides ./claude/settings.json. Run at your own risk.
 - Better to write your own scripts to run Claude, to know what it is doing.
 
+## Run as command line tool
 
-## Minimal Workflow
+You can run claude-runner.sh directly from command line:
 
-### Scenario
+```bash
+# Single prompt, 3 parallel runners
+./claude-runner.sh -p "Create a calculator app" -n 3
+
+# Multiple prompts in sequence, two runners run sequentially  
+./claude-runner.sh -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
+
+# With custom output directory
+./claude-runner.sh -p "Build a web app" -n 5 -b ./my-results
+
+# With project template
+./claude-runner.sh -p "Refactor this code" -n 3 --template-directory ./my-project
+
+# Print available options
+./claude-runner.sh --help
+```
+
+For more control over contexts and behavior, use config files instead.
+
+## With config file
+
+### Minimal Workflow
+
+#### Scenario
 Create three ASCII art files with random styles using claude
 
-### Detailed Seps
+#### Detailed Steps
 
 **1. Config file:**
 ```bash
@@ -62,7 +86,7 @@ cat results/*/00003_*/file1.txt
 # Shows third approach's ASCII art
 ```
 
-### What Happens
+#### What Happens
 
 1. **generate-contexts.sh** auto-generates:
    - Task name: `ascii-art` (from prompt)
@@ -95,19 +119,19 @@ Build a web calculator, compare results from three different approaches
 }
 ```
 
-### What Will Happen
+#### What Will Happen
 - `generate-contexts.sh config.json` will generate 3 CLAUDE.md files based on the provided text strings and create a new config file.
 - `claude-runner.sh config.json.new` will run 3 parallel Claude instances, each using a different context/personality (CLAUDE.md file). Reasonable defaults would be used for the rest of the config.
 - `claude-runner.sh config.json` would run as above, but with `runner_contexts` ignored as no CLAUDE.md files were provided.
 
 
-## Multi-Prompt Workflow
+### Multi-Prompt Workflow
 
-### Scenario
+#### Scenario
 
 Build a web calculator with additional instructions for error handling and unit tests, compare results from two different approaches. Run several tests of each approach for better sampling.
 
-### Config
+#### Config
 
 ```json
 {
@@ -122,12 +146,12 @@ Build a web calculator with additional instructions for error handling and unit 
 }
 ```
 
-### What Will Happen
+#### What Will Happen
 - `generate-contexts.sh config.json` will generate 2 CLAUDE.md files based on the provided text strings and create a new config file.
 - `claude-runner.sh config.json.new` will run 5 parallel Claude instances, each executing the three prompts in sequence, each using a different context/personality (CLAUDE.md file) rotating through the two contexts in the order they are provided.
 - `claude-runner.sh config.json` would run as above, but with no CLAUDE.md files for context, since no such files were provided.
 
-### Notes
+#### Notes
 - In this example, the three prompts could have been combined into one. However, results may vary.
 
 ## Run from existing project
@@ -154,18 +178,18 @@ Build a web calculator with additional instructions for error handling and unit 
 }
 ```
 
-### What Will Happen
+#### What Will Happen
 - `generate-contexts.sh config.json` will generate 2 CLAUDE.md files based on name, description, and the CLAUDE.md file in the project directory, and create a new config file.
 - `claude-runner.sh config.json.new` will run a total of 5 Claude instances starting from a full copy of the project directory, only 2 will run simultaneously. Each will use a different context/personality (CLAUDE.md file) rotating through the two contexts in the order they are provided.
 - `claude-runner.sh config.json` would run as above, but with default context from project directory, since even if runner_contexts exists, no CLAUDE.md files were provided.
 
-## Start From Simple CLAUDE.md File
+### Start From Simple CLAUDE.md File
 
-### Scenario
+#### Scenario
 
 A project idea is defined in a CLAUDE.md file, and we want to see how far claude can take this project.
 
-### Project idea in CLAUDE.md
+#### Project idea in CLAUDE.md
 
 Assume below file is saved to `./project_template/CLAUDE.md`. For the sake of this example, we keep content general and short to have claude come up with the ideas for the project.
 
@@ -176,7 +200,7 @@ Quest Seeker Online is a browser-based online game, where the user can join othe
 ```
 
 
-### Config
+#### Config
 
 ```json
 {
@@ -195,10 +219,10 @@ Quest Seeker Online is a browser-based online game, where the user can join othe
 }
 ```
 
-### What Will Happen
+#### What Will Happen
 - `claude-runner.sh config.json` will run 5 parallel Claude instances, each starting from the CLAUDE.md file in the project directory, each running all prompts in sequence. At the end of the run, you should have five different,  fun(?) and not-crashing(?) web-based RPG games to enjoy.
 
-## Parameters
+### Parameters
 
 See `generate-contexts.sh --help` and `claude-runner.sh --help` for available parameters.
 

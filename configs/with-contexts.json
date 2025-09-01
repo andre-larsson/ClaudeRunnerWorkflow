@@ -7,7 +7,6 @@
   "max_parallel": 3,
   "base_directory": "./results",
   "task_name": "santa-claus-ascii-art",
-  "execution_mode": "parallel",
   "runner_contexts": [
     {"name": "car-lover", "claudemd_file": "runner-contexts/car-lover/CLAUDE.md"},
     {"name": "cat-lover", "claudemd_file": "runner-contexts/cat-lover/CLAUDE.md"},
