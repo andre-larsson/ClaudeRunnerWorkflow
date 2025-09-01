@@ -11,7 +11,7 @@ TEMPLATE_FILE=""
 FORCE_REGENERATE=false
 DRY_RUN=false
 
-# Colors for output (consistent with multi-simple.sh style)
+# Colors for output (consistent with claude-runner.sh style)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -32,8 +32,8 @@ OPTIONS:
   -h, --help                  Show this help
 
 ABOUT:
-    - Generates CLAUDE.md context files from a config file, used when running multi-simple.sh.
-    - This is an optional step, run prior to running multi-simple.sh to generate unique instructions for different runners.
+    - Generates CLAUDE.md context files from a config file, used when running claude-runner.sh.
+    - This is an optional step, run prior to running claude-runner.sh to generate unique instructions for different runners.
 
 CONFIG FORMAT:
 {
@@ -55,7 +55,7 @@ MODES OF OPERATION:
         - num_runners is required and will be used to generate that many contexts
     - if runner_contexts array is provided
         - it will be used to generate the contexts and num_runners will be ignored
-    - new config file with name config_name.json.new will be created to be run with multi-simple.sh
+    - new config file with name config_name.json.new will be created to be run with claude-runner.sh
 
 EXAMPLES:
   # Generate all missing contexts from config
@@ -660,10 +660,10 @@ run_main() {
             
             if [ -f "$new_config_file" ]; then
                 echo
-                echo "Ready to run: ./multi-simple.sh $new_config_file"
+                echo "Ready to run: ./claude-runner.sh $new_config_file"
             else
                 echo
-                echo "Ready to run: ./multi-simple.sh $CONFIG_FILE"
+                echo "Ready to run: ./claude-runner.sh $CONFIG_FILE"
             fi
         fi
         return 0

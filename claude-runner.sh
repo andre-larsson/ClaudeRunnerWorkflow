@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# multi-simple-v2.sh - Simplified multi-runner for Claude with better defaults and tracking
+# claude-runner.sh - Simplified multi-runner for Claude with better defaults and tracking
 
 set -e
 
@@ -19,6 +19,8 @@ Command Line Options:
   --template-directory PATH      Template directory to copy
   -c, --runner-context "name:path"  Runner context (can repeat)
   -e, --execution-mode MODE      parallel|sequential (default: parallel)
+  --max-retries N                Max retry attempts for rate limits (default: 5)
+  --retry-delay N                Seconds to wait between retries (default: 3600)
 
 Examples:
   # Single prompt via CLI:
@@ -39,6 +41,8 @@ Config File Format:
     "prompts": ["Prompt 1", "Prompt 2"],
     "num_runners": 3,
     "max_parallel": 2,
+    "max_retries": 5,
+    "retry_delay": 3600,
     "runner_contexts": [
       {"name": "security", "claudemd_file": "runner-contexts/security/CLAUDE.md"}
     ]
@@ -60,6 +64,8 @@ if [[ "$1" == -* ]]; then
     BASE_DIR="./results"
     TEMPLATE_DIR=""
     EXEC_MODE="parallel"
+    MAX_RETRIES=5
+    RETRY_DELAY=3600
     CONFIG_FILE=""
     
     while [[ $# -gt 0 ]]; do
@@ -98,6 +104,14 @@ if [[ "$1" == -* ]]; then
                 ;;
             -e|--execution-mode)
                 EXEC_MODE="$2"
+                shift 2
+                ;;
+            --max-retries)
+                MAX_RETRIES="$2"
+                shift 2
+                ;;
+            --retry-delay)
+                RETRY_DELAY="$2"
                 shift 2
                 ;;
             *)
@@ -164,6 +178,8 @@ elif [ -f "$1" ]; then
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
     RUNNER_CONTEXTS=$(jq -c '.runner_contexts // []' "$CONFIG_FILE")
+    MAX_RETRIES=$(jq -r '.max_retries // 5' "$CONFIG_FILE")
+    RETRY_DELAY=$(jq -r '.retry_delay // 3600' "$CONFIG_FILE")
     TASK_NAME_ARG=""
 
 else
@@ -247,6 +263,73 @@ fi
 # Create timestamp and full run directory name
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RUN_DIR="${BASE_DIR}/${TASK_NAME}_${TIMESTAMP}"
+
+# Cleanup flag for interrupting sleeps
+CLEANUP_DONE=false
+
+# Interruptible sleep function
+interruptible_sleep() {
+    local duration="$1"
+    local elapsed=0
+    
+    while [ $elapsed -lt $duration ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+        # Check for interrupt signal
+        if [ "${CLEANUP_DONE}" = "true" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Execute Claude command with retry logic for rate limits
+run_claude_with_retry() {
+    local prompt="$1"
+    local log_file="$2"
+    local runner_num="$3"
+    local max_attempts="${4:-5}"
+    local retry_delay="${5:-3600}"
+    
+    local attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        echo "=== ATTEMPT $attempt ===" >> "$log_file"
+        echo "$(date): Starting attempt $attempt" >> "$log_file"
+        echo "[Runner $runner_num] Attempt $attempt/$max_attempts"
+        
+        # Execute Claude with timeout
+        local output
+        local exit_code
+        if command -v timeout >/dev/null 2>&1; then
+            output=$(timeout 7200 claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" -p "$prompt" 2>&1)
+            exit_code=$?
+            if [ $exit_code -eq 124 ]; then
+                echo "=== TIMEOUT ===" >> "$log_file"
+                return 124  # Return timeout immediately, don't retry
+            fi
+        else
+            output=$(claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" -p "$prompt" 2>&1)
+            exit_code=$?
+        fi
+        
+        echo "$output" >> "$log_file"
+        
+        # Check for rate limit in output
+        if echo "$output" | grep -qi "limit reached\|rate limit\|too many requests"; then
+            echo "[Runner $runner_num] Rate limit reached. Waiting $retry_delay seconds before retry..."
+            echo "$(date): Rate limit hit, waiting $retry_delay seconds" >> "$log_file"
+            interruptible_sleep "$retry_delay" || return 1
+            attempt=$((attempt + 1))
+        else
+            # Either success or non-recoverable failure
+            return $exit_code
+        fi
+    done
+    
+    echo "[Runner $runner_num] Max retry attempts ($max_attempts) reached"
+    echo "$(date): Max retry attempts reached" >> "$log_file"
+    return 1
+}
 
 # Update summary with runner status
 update_summary() {
@@ -397,22 +480,9 @@ run_claude() {
             echo "$current_prompt" >> "$log_file"
             echo "=== OUTPUT ===" >> "$log_file"
             
-            # Run Claude for this prompt
-            if command -v timeout >/dev/null 2>&1; then
-                timeout 7200 claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" \
-                       -p "$current_prompt" >> "$log_file" 2>&1
-                exit_code=$?
-                if [ $exit_code -eq 124 ]; then
-                    echo "[Runner $runner_num] Prompt $prompt_num timed out after 2 hours"
-                    echo "=== TIMEOUT ===" >> "$log_file"
-                    overall_exit_code=124
-                    break
-                fi
-            else
-                claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" \
-                       -p "$current_prompt" >> "$log_file" 2>&1
-                exit_code=$?
-            fi
+            # Run Claude for this prompt with retry logic
+            run_claude_with_retry "$current_prompt" "$log_file" "$runner_num" "$MAX_RETRIES" "$RETRY_DELAY"
+            exit_code=$?
             
             echo "$(date): Prompt $prompt_num completed (exit: $exit_code)" >> timing.log
             
@@ -509,6 +579,8 @@ else
   "base_directory": "$BASE_DIR",
   "project_template": "$TEMPLATE_DIR",
   "execution_mode": "$EXEC_MODE",
+  "max_retries": $MAX_RETRIES,
+  "retry_delay": $RETRY_DELAY,
   "runner_contexts": $RUNNER_CONTEXTS
 }
 EOF
