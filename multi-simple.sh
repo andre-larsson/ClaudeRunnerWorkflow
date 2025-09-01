@@ -44,7 +44,7 @@ Config File Format:
     ]
   }
 
-Output: results/TASK_NAME/runner_*/
+Output: results/TASK_NAME/00001_<context_name>/
 EOF
     exit 0
 fi
@@ -160,7 +160,7 @@ elif [ -f "$1" ]; then
     # Auto-scale parallelism - default to num_runners unless specified
     MAX_PARALLEL=$(jq -r '.max_parallel // '$NUM_RUNNERS "$CONFIG_FILE")
     TEMPLATE_DIR=$(jq -r '.project_template // ""' "$CONFIG_FILE")
-    EXEC_MODE=$(jq -r '.execution_mode // "sequential"' "$CONFIG_FILE")
+    EXEC_MODE=$(jq -r '.execution_mode // "parallel"' "$CONFIG_FILE")
     CONFIG_TASK_NAME=$(jq -r '.task_name // ""' "$CONFIG_FILE")
     BASE_DIR=$(jq -r '.base_directory // "./results"' "$CONFIG_FILE")
     RUNNER_CONTEXTS=$(jq -c '.runner_contexts // []' "$CONFIG_FILE")
@@ -189,6 +189,53 @@ if [ -z "$PROMPTS" ] || [ "$PROMPTS" = "[]" ]; then
     exit 1
 fi
 
+# Filter out contexts with missing/invalid claudemd_file to avoid confusion
+filter_valid_contexts() {
+    if [ "$RUNNER_CONTEXTS" = "[]" ] || [ "$RUNNER_CONTEXTS" = "null" ]; then
+        return 0
+    fi
+    
+    local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
+    if [ "$contexts_count" -eq 0 ]; then
+        return 0
+    fi
+    
+    echo "[Manager] Filtering contexts with valid CLAUDE.md files..." >&2
+    
+    local valid_contexts="[]"
+    local filtered_count=0
+    
+    for ((i=0; i<contexts_count; i++)); do
+        local context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$i].name // \"context_$i\"")
+        local claudemd_file=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$i].claudemd_file // \"\"")
+        
+        if [ -n "$claudemd_file" ] && [ "$claudemd_file" != "null" ] && [ -f "$claudemd_file" ]; then
+            # Valid context - add to filtered list
+            local context_obj=$(echo "$RUNNER_CONTEXTS" | jq ".[$i]")
+            valid_contexts=$(echo "$valid_contexts" | jq ". += [$context_obj]")
+        else
+            # Invalid context - log and skip
+            echo "[Manager] Filtering out context '$context_name': CLAUDE.md file missing or invalid ($claudemd_file)" >&2
+            ((filtered_count++))
+        fi
+    done
+    
+    local valid_count=$(echo "$valid_contexts" | jq 'length')
+    
+    if [ "$valid_count" -eq 0 ]; then
+        echo "[Manager] Warning: All contexts filtered out due to missing CLAUDE.md files. Runners will use default behavior." >&2
+        RUNNER_CONTEXTS="[]"
+    else
+        RUNNER_CONTEXTS="$valid_contexts"
+        if [ "$filtered_count" -gt 0 ]; then
+            echo "[Manager] Using $valid_count valid contexts (filtered out $filtered_count invalid)" >&2
+        fi
+    fi
+}
+
+# Apply context filtering
+filter_valid_contexts
+
 # Determine run name (priority: CLI arg > config > generated)
 TASK_NAME="${TASK_NAME_ARG:-$CONFIG_TASK_NAME}"
 if [ -z "$TASK_NAME" ] || [ "$TASK_NAME" = "null" ]; then
@@ -208,16 +255,32 @@ update_summary() {
     echo "|--------|--------|------------|----------|" >> "$RUN_DIR/README.md"
     
     for i in $(seq 1 "$NUM_RUNNERS"); do
-        local status_file="$RUN_DIR/runner_${i}/status.txt"
-        local timing_file="$RUN_DIR/runner_${i}/timing.log"
+        # Get context name for directory lookup
+        local context_name=""
+        if [ "$RUNNER_CONTEXTS" != "[]" ] && [ "$RUNNER_CONTEXTS" != "null" ]; then
+            local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
+            if [ "$contexts_count" -gt 0 ]; then
+                local context_index=$(( (i - 1) % contexts_count ))
+                context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].name // \"context_$context_index\"")
+            else
+                context_name="default"
+            fi
+        else
+            context_name="default"
+        fi
+        
+        local runner_padded=$(printf "%05d" $i)
+        local runner_dir_name="${runner_padded}_${context_name}"
+        local status_file="$RUN_DIR/$runner_dir_name/status.txt"
+        local timing_file="$RUN_DIR/$runner_dir_name/timing.log"
         
         if [ -f "$status_file" ]; then
             local status=$(cat "$status_file")
             local start_time=$(grep "Started" "$timing_file" 2>/dev/null | cut -d: -f2- || echo "-")
             local end_time=$(grep "Completed" "$timing_file" 2>/dev/null | cut -d: -f2- || echo "-")
-            echo "| runner_$i | $status | $start_time | $end_time |" >> "$RUN_DIR/README.md"
+            echo "| $runner_dir_name | $status | $start_time | $end_time |" >> "$RUN_DIR/README.md"
         else
-            echo "| runner_$i | not started | - | - |" >> "$RUN_DIR/README.md"
+            echo "| $runner_dir_name | not started | - | - |" >> "$RUN_DIR/README.md"
         fi
     done
 }
@@ -235,17 +298,34 @@ echo "========================================="
 # Setup runner directory
 setup_runner() {
     local runner_num=$1
-    local runner_dir="$RUN_DIR/runner_${runner_num}"
+    
+    # Get context name for directory naming
+    local context_name=""
+    if [ "$RUNNER_CONTEXTS" != "[]" ] && [ "$RUNNER_CONTEXTS" != "null" ]; then
+        local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
+        if [ "$contexts_count" -gt 0 ]; then
+            local context_index=$(( (runner_num - 1) % contexts_count ))
+            context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].name // \"context_$context_index\"")
+        else
+            context_name="default"
+        fi
+    else
+        context_name="default"
+    fi
+    
+    # Format runner number with leading zeros and append context name
+    local runner_padded=$(printf "%05d" $runner_num)
+    local runner_dir="$RUN_DIR/${runner_padded}_${context_name}"
     
     mkdir -p "$runner_dir"
     
-    # Copy template if specified
+    # Copy template if specified (includes any project_template/CLAUDE.md as base)
     if [ -n "$TEMPLATE_DIR" ] && [ "$TEMPLATE_DIR" != "null" ] && [ -d "$TEMPLATE_DIR" ]; then
         echo "[Runner $runner_num] Copying template..." >&2
         cp -r "$TEMPLATE_DIR"/. "$runner_dir/" 2>/dev/null || true
     fi
     
-    # Copy runner-specific CLAUDE.md context (with modulus for overflow)
+    # Copy runner-specific CLAUDE.md context (overwrites template CLAUDE.md if present)
     if [ "$RUNNER_CONTEXTS" != "[]" ] && [ "$RUNNER_CONTEXTS" != "null" ]; then
         local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
         if [ "$contexts_count" -gt 0 ]; then
@@ -395,7 +475,7 @@ run_parallel() {
     
     # Wait for all remaining jobs with progress
     echo "[Manager] All runners started. Waiting for completion..."
-    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/runner_*/prompt_*.log"
+    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/*/prompt_*.log"
     
     local completed=0
     for pid in "${pids[@]}"; do
@@ -463,8 +543,8 @@ if [ ! -f "$INDEX_FILE" ]; then
 fi
 
 # Count completed runners
-COMPLETED=$(grep -l "completed" "$RUN_DIR"/runner_*/status.txt 2>/dev/null | wc -l)
-FAILED=$(grep -l "failed" "$RUN_DIR"/runner_*/status.txt 2>/dev/null | wc -l)
+COMPLETED=$(grep -l "completed" "$RUN_DIR"/*/status.txt 2>/dev/null | wc -l)
+FAILED=$(grep -l "failed" "$RUN_DIR"/*/status.txt 2>/dev/null | wc -l)
 STATUS="${COMPLETED}✓"
 [ $FAILED -gt 0 ] && STATUS="$STATUS ${FAILED}✗"
 
@@ -479,12 +559,28 @@ echo "========================================="
 echo ""
 echo "Runner Status:"
 for i in $(seq 1 "$NUM_RUNNERS"); do
-    status_file="$RUN_DIR/runner_${i}/status.txt"
+    # Get context name for directory lookup
+    local context_name=""
+    if [ "$RUNNER_CONTEXTS" != "[]" ] && [ "$RUNNER_CONTEXTS" != "null" ]; then
+        local contexts_count=$(echo "$RUNNER_CONTEXTS" | jq 'length')
+        if [ "$contexts_count" -gt 0 ]; then
+            local context_index=$(( (i - 1) % contexts_count ))
+            context_name=$(echo "$RUNNER_CONTEXTS" | jq -r ".[$context_index].name // \"context_$context_index\"")
+        else
+            context_name="default"
+        fi
+    else
+        context_name="default"
+    fi
+    
+    local runner_padded=$(printf "%05d" $i)
+    local runner_dir_name="${runner_padded}_${context_name}"
+    status_file="$RUN_DIR/$runner_dir_name/status.txt"
     if [ -f "$status_file" ]; then
         status=$(cat "$status_file")
-        echo "  Runner $i: $status"
+        echo "  $runner_dir_name: $status"
     else
-        echo "  Runner $i: not started"
+        echo "  $runner_dir_name: not started"
     fi
 done
 echo ""
@@ -492,7 +588,7 @@ echo "Output Structure:"
 echo "$RUN_DIR/"
 echo "├── config.json              # Configuration used"
 echo "├── execution.log            # Overall timing"
-echo "├── runner_*/"
+echo "├── 00001_<context_name>/"
 echo "│   ├── info.txt             # Runner details"
 echo "│   ├── status.txt           # Status"
 echo "│   ├── timing.log           # Start/end times"

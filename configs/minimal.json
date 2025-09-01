@@ -1,5 +1,4 @@
 {
-    "prompts": ["Create file file1.txt and file2.txt and exit."],
-    "num_runners": 3,
-    "task_name": "basic"
+    "prompts": ["Create file file1.txt with ASCII art of your choice and exit."],
+    "num_runners": 3
   }

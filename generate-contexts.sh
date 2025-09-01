@@ -37,17 +37,25 @@ ABOUT:
 
 CONFIG FORMAT:
 {
-  "prompts": ["Task prompts for context relevance"], // Task prompt
-  "task_name": "optional-task-identifier", // Task name
-  "runner_contexts": [
-    "context-name",                           // String → genereate name and claudemd_file
+  "prompts": ["Task prompts for context relevance"], // Task prompt, required
+  "task_name": "optional-task-identifier", // Task name, optional
+  "num_runners": 3, // Number of runners to generate contexts for, only required if runner_contexts array is not provided
+  "runner_contexts": [ // Array of contexts to generate, required if num_runners is not provided
+    "context-name",                           // If simple string → claude will generate a name and claudemd_file
     {
-      "name": "expert-type",                  // Name of the context, and savedir of context file, included in context generation prompt
+      "name": "expert-type",                  // Name of the context, and savedir of context file, included in context generation prompt, required
       "description": "Custom description",    // Additional description of the context, included in context generation prompt
       "claudemd_file": "custom/path.md"       // Path to existing context file
     }
   ]
 }
+
+MODES OF OPERATION:
+    - if runner_contexts array is not provided
+        - num_runners is required and will be used to generate that many contexts
+    - if runner_contexts array is provided
+        - it will be used to generate the contexts and num_runners will be ignored
+    - new config file with name config_name.json.new will be created to be run with multi-simple.sh
 
 EXAMPLES:
   # Generate all missing contexts from config
@@ -213,17 +221,85 @@ normalize_runner_contexts() {
         return 1
     fi
     
-    # Check if runner_contexts exists and is an array
-    if ! jq -e '.runner_contexts | type == "array"' "$config_file" >/dev/null 2>&1; then
-        log_info "No runner_contexts found in config, nothing to generate"
-        return 0
-    fi
-    
     local temp_config=$(mktemp)
     local contexts_updated=false
     
     # Copy original config
     cp "$config_file" "$temp_config"
+    
+    # Check if task_name exists, if not generate it from prompts
+    local task_name=$(jq -r '.task_name // empty' "$temp_config")
+    if [ -z "$task_name" ] || [ "$task_name" = "null" ]; then
+        local config_prompts=$(jq -r '.prompts[]? // empty' "$temp_config" | paste -sd, -)
+        if [ -n "$config_prompts" ]; then
+            log_info "No task_name found, generating from prompts"
+            if [ "$DRY_RUN" = true ]; then
+                task_name="generated-task-name"
+            else
+                task_name=$(generate_name "$config_prompts")
+            fi
+            
+            # Add task_name to config
+            jq ".task_name = \"$task_name\"" "$temp_config" > "${temp_config}.tmp"
+            mv "${temp_config}.tmp" "$temp_config"
+            contexts_updated=true
+            
+            log_info "Generated task_name: $task_name"
+        fi
+    fi
+    
+    # Check if runner_contexts exists and is an array
+    if ! jq -e '.runner_contexts | type == "array"' "$config_file" >/dev/null 2>&1; then
+        # runner_contexts doesn't exist, generate from num_runners
+        local num_runners=$(jq -r '.num_runners // empty' "$config_file")
+        
+        if [ -z "$num_runners" ] || [ "$num_runners" = "null" ]; then
+            log_error "No runner_contexts found and num_runners not specified"
+            rm "$temp_config"
+            return 1
+        fi
+        
+        if ! [[ "$num_runners" =~ ^[0-9]+$ ]] || [ "$num_runners" -lt 1 ]; then
+            log_error "num_runners must be a positive integer"
+            rm "$temp_config"
+            return 1
+        fi
+        
+        log_info "No runner_contexts found, generating $num_runners random contexts"
+        
+        # Get prompts and task_name for context generation
+        local config_prompts=$(jq -r '.prompts[]? // empty' "$temp_config" | paste -sd, -)
+        local task_name=$(jq -r '.task_name // empty' "$temp_config")
+        
+        # Generate random contexts array
+        local contexts_json="["
+        for ((i=0; i<num_runners; i++)); do
+            if [ $i -gt 0 ]; then
+                contexts_json+=","
+            fi
+            
+            # Generate random description and name
+            local description
+            if [ "$DRY_RUN" = true ]; then
+                description="Random context description $((i+1))"
+            else
+                description=$(context_description_from_prompts "$config_prompts" "$task_name")
+            fi
+            
+            local name=$(generate_name "$description")
+            local path=$(generate_path "$name")
+            
+            contexts_json+="{\"name\":\"$name\",\"description\":\"$description\",\"claudemd_file\":\"$path\"}"
+        done
+        contexts_json+="]"
+        
+        # Add runner_contexts to config
+        jq ".runner_contexts = $contexts_json" "$temp_config" > "${temp_config}.tmp"
+        mv "${temp_config}.tmp" "$temp_config"
+        contexts_updated=true
+        
+        log_info "Generated $num_runners random contexts"
+    fi
     
     # Process each context
     local length=$(jq '.runner_contexts | length' "$temp_config")
@@ -371,13 +447,32 @@ context_description_from_prompts() {
     local task_name="$2"
     
     # Use Claude to generate a creative context idea
-    local meta_prompt="Generate a short, creative description (1-2 sentences) for a unique CLAUDE.md context that would bring an interesting perspective to tasks like: $config_prompts"
+    local meta_prompt="Generate a short description (1-3 sentences) that would bring a new or old perspective to tasks like, make it unpredictable and unique: $config_prompts"
     
     if [ -n "$task_name" ]; then
-        meta_prompt+=" (specifically for '$task_name' workflows)"
+        meta_prompt+="\n\nName of workflow: '$task_name'"
+    else
+        # Add randomness when no specific task_name is provided
+        local randomizers=(
+            "Draw inspiration from an unexpected domain (art, psychology, biology, etc.)"
+            "Combine two different expertise areas in an unusual way"
+            "Think from a contrarian or unconventional perspective" 
+            "Focus on an overlooked or niche specialization"
+            "Adopt a historical or futuristic approach to modern problems"
+            "Consider cross-cultural or interdisciplinary methodologies"
+            "Be traditional and conservatival but with a twist"
+            "Be nerdy and deeply technical, valuing esoteric knowledge"
+            "Choose a programming paradigm or concept to focus on"
+            "Draw inspiration from the occult, mysticism, numerology or astrology"
+            "Emphasize an extreme position (minimalism, maximalism, paranoia, optimism)"
+        )
+        
+        # Pick a random approach (using process substitution for randomness)
+        local random_index=$((RANDOM % ${#randomizers[@]}))
+        meta_prompt+="\n\nRandomization hint: ${randomizers[$random_index]}"
     fi
     
-    meta_prompt+=". Focus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect'. Return only the description, no extra text."
+    meta_prompt+="\n\nFocus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect', 'Chaos engineer', 'Documentation obsessive', 'Legacy system archaeologist'. Return only the description."
     
     echo "$meta_prompt" | claude 2>/dev/null || echo "Creative problem-solving expert with unconventional approaches"
 }
@@ -390,8 +485,11 @@ generate_single_context() {
     local task_name="$5"
     
     local context_dir=$(dirname "$claudemd_file")
+
+    echo "DEBUG: Checking '$claudemd_file' - exists: $(test -f "$claudemd_file" && echo YES || echo NO), force: $FORCE_REGENERATE"
     
     # Check if file exists and should be skipped
+    log_info "DEBUG: Checking '$claudemd_file' - exists: $(test -f "$claudemd_file" && echo YES || echo NO), force: $FORCE_REGENERATE"
     if [ -f "$claudemd_file" ] && [ "$FORCE_REGENERATE" = false ]; then
         log_info "Context exists, skipping: $claudemd_file"
         return 0

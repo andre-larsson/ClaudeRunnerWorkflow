@@ -11,6 +11,11 @@ Run Claude CLI tasks in parallel with different contexts and compare results.
 # With contexts (different "personalities")  
 ./generate-contexts.sh my-config.json
 ./multi-simple.sh my-config.json
+
+# Minimal config (auto-generates everything)
+echo '{"prompts": ["Build a web app"], "num_runners": 3}' > minimal.json
+./generate-contexts.sh minimal.json
+./multi-simple.sh minimal.json.new
 ```
 
 ## Tools
@@ -25,6 +30,7 @@ Run Claude CLI tasks in parallel with different contexts and compare results.
 {
   "prompts": ["Create calculator", "Add styling", "Add tests"],
   "num_runners": 3,
+  "task_name": "calculator-app",
   "runner_contexts": [
     "security-expert",
     {"name": "beginner", "description": "Patient mentor with clear explanations"},
@@ -32,6 +38,10 @@ Run Claude CLI tasks in parallel with different contexts and compare results.
   ]
 }
 ```
+
+**Optional Fields:**
+- **`task_name`** - Auto-generated from prompts if not provided
+- **`runner_contexts`** - Auto-generated random contexts using `num_runners` if not provided
 
 ## CLI Usage
 
@@ -46,6 +56,23 @@ Run Claude CLI tasks in parallel with different contexts and compare results.
 ./generate-contexts.sh my-config.json
 ./multi-simple.sh my-config.json
 ```
+
+## Automatic Generation
+
+**Missing `task_name`?** Auto-generated from prompts using Claude
+**Missing `runner_contexts`?** Auto-generated random contexts based on prompts
+
+```json
+{
+  "prompts": ["Build a REST API"],
+  "num_runners": 3
+}
+```
+
+**Results in directories like:**
+- `00001_api-security-expert/`
+- `00002_performance-optimizer/` 
+- `00003_documentation-focused/`
 
 ## Prerequisites
 
