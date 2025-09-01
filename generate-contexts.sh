@@ -26,21 +26,25 @@ USAGE:
   $(basename "$0") CONFIG_FILE [OPTIONS]
 
 OPTIONS:
-  --force                     Regenerate existing contexts
-  --template FILE             Global template for all contexts
+  --force                     Regenerate existing CLAUDE.md context files even if they exist
+  --template FILE             Global template that will be used as basis for generated ones
   --dry-run                   Show what would be generated without creating files
   -h, --help                  Show this help
 
+ABOUT:
+    - Generates CLAUDE.md context files from a config file, used when running multi-simple.sh.
+    - This is an optional step, run prior to running multi-simple.sh to generate unique instructions for different runners.
+
 CONFIG FORMAT:
 {
-  "prompts": ["Task prompts for context relevance"],
-  "task_name": "optional-task-identifier",
+  "prompts": ["Task prompts for context relevance"], // Task prompt
+  "task_name": "optional-task-identifier", // Task name
   "runner_contexts": [
-    "context-name",                           // String → auto-path + name-based
+    "context-name",                           // String → genereate name and claudemd_file
     {
-      "name": "expert-type",                  // Auto-path + name-based  
-      "description": "Custom description",    // Uses description if provided
-      "claudemd_file": "custom/path.md"       // Explicit path (optional)
+      "name": "expert-type",                  // Name of the context, and savedir of context file, included in context generation prompt
+      "description": "Custom description",    // Additional description of the context, included in context generation prompt
+      "claudemd_file": "custom/path.md"       // Path to existing context file
     }
   ]
 }
@@ -190,7 +194,7 @@ generate_name() {
         return
     fi
     # Call Claude and clean up the response
-    local name=$(claude --permission-mode "plan" -p "Summarize the following string in three words using kebab-case, return answer only: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+    local name=$(claude --permission-mode "plan" -p "Summarize the following string in 1 to 3 words using kebab-case, return answer only: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
     
     # If Claude returns empty or just whitespace, fall back to sanitized original
     if [ -z "$name" ]; then
@@ -360,7 +364,9 @@ Return ONLY the CLAUDE.md file content - no explanations, no wrapper text, just 
     echo "$generation_prompt"
 }
 
-generate_random_context_prompt() {
+# Description that will be sent to Claude instead of runner_contexts.description
+# if task prompts are provided
+context_description_from_prompts() {
     local config_prompts="$1"
     local task_name="$2"
     
@@ -410,7 +416,7 @@ generate_single_context() {
             description="[Random context would be generated]"
         else
             log_info "Generating random context description..."
-            description=$(generate_random_context_prompt "$config_prompts" "$task_name")
+            description=$(context_description_from_prompts "$config_prompts" "$task_name")
             log_info "Generated description: $description"
         fi
     fi

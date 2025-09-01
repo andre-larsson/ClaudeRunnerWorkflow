@@ -199,7 +199,7 @@ fi
 
 # Create timestamp and full run directory name
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-RUN_DIR="${BASE_DIR}/${TASK_NAME}"
+RUN_DIR="${BASE_DIR}/${TASK_NAME}_${TIMESTAMP}"
 
 # Update summary with runner status
 update_summary() {

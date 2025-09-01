@@ -6,6 +6,7 @@ logs/
 # Simple runner output directories
 results/
 runs/
+runner_contexts/
 
 # Generated runner configs (keep example configs)
 *-config.json
@@ -91,3 +92,4 @@ pids/
 *.pid
 *.seed
 *.pid.lock
+*.json.new
