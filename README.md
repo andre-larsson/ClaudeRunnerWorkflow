@@ -23,19 +23,13 @@ A task can consist of multiple prompts, carried out in sequence.
 - Permissions are sent to claude via --allowedTools flag, which overrides ./claude/settings.json. Run at your own risk.
 - Better to write your own scripts to run Claude, to know what it is doing.
 
-## Run as command line tool
+## Command Line Interface (CLI)
 
 You can run claude-runner.sh directly from command line:
 
 ```bash
-# Single prompt, 3 parallel runners
-./claude-runner.sh -p "Create a calculator app" -n 3
-
 # Multiple prompts in sequence, two runners run sequentially  
 ./claude-runner.sh -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
-
-# With custom output directory
-./claude-runner.sh -p "Build a web app" -n 5 -b ./my-results
 
 # With project template
 ./claude-runner.sh -p "Refactor this code" -n 3 --template-directory ./my-project
@@ -46,7 +40,28 @@ You can run claude-runner.sh directly from command line:
 
 For more control over contexts and behavior, use config files instead.
 
-## With config file
+## With Config File
+
+Config files provide full control over runner contexts, execution parameters, and project templates. Only `prompts` is required - all other parameters have sensible defaults or auto-generation.
+
+**Complete config example with all parameters:**
+```json
+{
+  "prompts": ["Create calculator", "Add styling", "Add tests"],
+  "num_runners": 3,
+  "task_name": "calculator-app", 
+  "max_parallel": 2,
+  "project_template": "./my_project",
+  "base_directory": "./results",
+  "runner_contexts": [
+    "security-expert",
+    {"name": "beginner", "description": "Patient mentor with clear explanations"},
+    {"claudemd_file": "custom/path.md"}
+  ]
+}
+```
+
+## Config File Examples
 
 ### Minimal Workflow
 
@@ -231,6 +246,6 @@ See `generate-contexts.sh --help` and `claude-runner.sh --help` for available pa
 
 - If you have Claude Code with a subscription, you will of course eventually run into the rate-limit if you spawn enough runners.
 - If this happens, claude-runner will wait for one hour and try again, five times, for each prompt, meaning your task should eventually complete, even if it takes a while.
-- I'm not using git for version control of the runs, even though I imagine it would have been very useful. Unfortunately I found git+claude to be very buggy both in interactive and non-interactive mode. Permissions seem to be ignored, with claude just refusing to call git, when they work fine for other tools. Could be that claude code has their own git integration and github actions app, and this clashes with standard git in terminal window, or other way around? Pure speculation, might just be my configuration is wrong somewhere.
+- I'm not using git for version control of the runs to avoid nested git repositories.
 - This project was of course written with the help of claude code, guided by a human hand (promise).
 - claude-runner.sh can start claude instances either in parallel or sequential, while generate-contexts.sh runs everything after each other.
