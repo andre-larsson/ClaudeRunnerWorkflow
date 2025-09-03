@@ -8,6 +8,8 @@ set -e
 DEFAULT_MAX_RETRIES=5          # Max retry attempts for rate limits
 DEFAULT_RETRY_DELAY=3600       # Seconds to wait between retries (1 hour)
 WORKER_SPAWN_DELAY=3           # Seconds to wait between spawning workers
+MODEL="sonnet"                 # Claude model to use
+ALLOWED_TOOLS="Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep"  # Allowed tools for Claude
 
 # Help message
 if [ "$1" = "--help" ] || [ "$1" = "-h" ] || [ $# -eq 0 ]; then
@@ -213,7 +215,8 @@ filter_valid_contexts() {
             valid_contexts=$(echo "$valid_contexts" | jq ". += [$context_obj]")
         else
             # Invalid context - log and skip
-            echo "[Manager] Filtering out context '$context_name': CLAUDE.md file missing or invalid ($claudemd_file)" >&2
+            echo "[Manager] Filtering out context '$context_name'. CLAUDE.md file missing or invalid: $claudemd_file." >&2
+            echo "[Manager] Maybe you forgot to generate contexts or supplied the wrong file?" >&2
             ((filtered_count++))
         fi
     done
@@ -283,14 +286,14 @@ run_claude_with_retry() {
         local output
         local exit_code
         if command -v timeout >/dev/null 2>&1; then
-            output=$(timeout 7200 claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" -p "$prompt" 2>&1)
+            output=$(timeout $DEFAULT_RETRY_DELAY claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" -p "$prompt" 2>&1)
             exit_code=$?
             if [ $exit_code -eq 124 ]; then
                 echo "=== TIMEOUT ===" >> "$log_file"
                 return 124  # Return timeout immediately, don't retry
             fi
         else
-            output=$(claude --allowedTools "Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep" -p "$prompt" 2>&1)
+            output=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" -p "$prompt" 2>&1)
             exit_code=$?
         fi
         
@@ -337,7 +340,7 @@ update_summary() {
         local runner_padded=$(printf "%05d" $i)
         local runner_dir_name="${runner_padded}_${context_name}"
         local status_file="$RUN_DIR/$runner_dir_name/status.txt"
-        local timing_file="$RUN_DIR/$runner_dir_name/timing.log"
+        local timing_file="$RUN_DIR/$runner_dir_name/logs/timing.log"
         
         if [ -f "$status_file" ]; then
             local status=$(cat "$status_file")
@@ -383,6 +386,7 @@ setup_runner() {
     local runner_dir="$RUN_DIR/${runner_padded}_${context_name}"
     
     mkdir -p "$runner_dir"
+    mkdir -p "$runner_dir/logs"
     
     # Copy template if specified (includes any project_template/CLAUDE.md as base)
     if [ -n "$TEMPLATE_DIR" ] && [ "$TEMPLATE_DIR" != "null" ] && [ -d "$TEMPLATE_DIR" ]; then
@@ -442,7 +446,7 @@ run_claude() {
     
     # Create status file
     echo "running" > "$runner_dir/status.txt"
-    echo "$(date): Started" > "$runner_dir/timing.log"
+    echo "$(date): Started" > "$runner_dir/logs/timing.log"
     
     # Execute prompt sequence
     (
@@ -455,7 +459,7 @@ run_claude() {
         for i in $(seq 0 $((prompt_count-1))); do
             local current_prompt=$(echo "$PROMPTS" | jq -r ".[$i]")
             local prompt_num=$((i+1))
-            local log_file="prompt_${prompt_num}.log"
+            local log_file="logs/prompt_${prompt_num}.log"
             
             echo "[Runner $runner_num] Executing prompt $prompt_num/$prompt_count"
             echo "=== PROMPT $prompt_num ===" >> "$log_file"
@@ -466,7 +470,7 @@ run_claude() {
             run_claude_with_retry "$current_prompt" "$log_file" "$runner_num" "$DEFAULT_MAX_RETRIES" "$DEFAULT_RETRY_DELAY"
             exit_code=$?
             
-            echo "$(date): Prompt $prompt_num completed (exit: $exit_code)" >> timing.log
+            echo "$(date): Prompt $prompt_num completed (exit: $exit_code)" >> logs/timing.log
             
             if [ $exit_code -ne 0 ]; then
                 echo "[Runner $runner_num] Prompt $prompt_num failed (exit: $exit_code)"
@@ -479,7 +483,7 @@ run_claude() {
         done
         
         # Update final status
-        echo "$(date): Overall completed (exit: $overall_exit_code)" >> timing.log
+        echo "$(date): Overall completed (exit: $overall_exit_code)" >> logs/timing.log
         if [ $overall_exit_code -eq 0 ]; then
             echo "completed" > status.txt
             echo "[Runner $runner_num] All prompts completed successfully"
@@ -527,7 +531,7 @@ run_parallel() {
     
     # Wait for all remaining jobs with progress
     echo "[Manager] All runners started. Waiting for completion..."
-    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/*/prompt_*.log"
+    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/*/logs/prompt_*.log"
     
     local completed=0
     for pid in "${pids[@]}"; do
@@ -635,8 +639,9 @@ echo "├── execution.log            # Overall timing"
 echo "├── 00001_<context_name>/"
 echo "│   ├── info.txt             # Runner details"
 echo "│   ├── status.txt           # Status"
-echo "│   ├── timing.log           # Start/end times"
-echo "│   └── prompt_*.log         # Claude output per prompt"
+echo "│   ├── logs/"
+echo "│   │   ├── timing.log       # Start/end times"
+echo "│   │   └── prompt_*.log     # Claude output per prompt"
 echo "└── README.md                # Run summary with status table"
 echo ""
 echo "Index updated: $INDEX_FILE"

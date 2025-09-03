@@ -10,6 +10,8 @@ CONFIG_FILE=""
 TEMPLATE_FILE=""
 FORCE_REGENERATE=false
 DRY_RUN=false
+MODEL="sonnet"
+ALLOWED_TOOLS="Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep"  # Allowed tools for Claude
 
 # Colors for output (consistent with claude-runner.sh style)
 RED='\033[0;31m'
@@ -173,6 +175,12 @@ validate_requirements() {
         log_error "Config file not readable: $CONFIG_FILE"
         exit 1
     fi
+
+    # Check if config file ends with .json
+    if ! [[ "$CONFIG_FILE" =~ \.json$ ]]; then
+        log_error "Config file must end with .json: $CONFIG_FILE"
+        exit 1
+    fi
     
     # Validate template file if provided
     if [ -n "$TEMPLATE_FILE" ]; then
@@ -195,6 +203,9 @@ generate_path() {
 
 generate_name() {
     local string="$1"
+
+    echo "WARNING: Generating name for '$string'. Results may be unpredictable."
+
     if [ "$DRY_RUN" = true ]; then
         # In dry-run, just sanitize the string to a directory name
         local directory=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
@@ -202,8 +213,11 @@ generate_name() {
         return
     fi
     # Call Claude and clean up the response
-    local name=$(claude --permission-mode "plan" -p "Summarize the following string in 1 to 3 words using kebab-case, return answer only: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
-    
+    local name=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" --permission-mode "plan" -p "Summarize the following string in 1 to 2 words using kebab-case: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+
+    # truncate
+    name=$(echo "$name" | cut -c1-20)
+
     # If Claude returns empty or just whitespace, fall back to sanitized original
     if [ -z "$name" ]; then
         name=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
@@ -476,7 +490,7 @@ context_description_from_prompts() {
     
     meta_prompt+="\n\nFocus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect', 'Chaos engineer', 'Documentation obsessive', 'Legacy system archaeologist'. Return only the description."
     
-    echo "$meta_prompt" | claude 2>/dev/null || echo "Creative problem-solving expert with unconventional approaches"
+    echo "$meta_prompt" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" 2>/dev/null || echo "Creative problem-solving expert with unconventional approaches"
 }
 
 generate_single_context() {
@@ -548,7 +562,7 @@ generate_single_context() {
     # Run Claude CLI and capture output
     if [ -n "$effective_template" ]; then
         log_info "Using template: $effective_template"
-        if cat "$effective_template" | claude -p "$(cat "$temp_prompt")" > "$claudemd_file" 2>/dev/null; then
+        if cat "$effective_template" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" -p "$(cat "$temp_prompt")" > "$claudemd_file" 2>/dev/null; then
             rm "$temp_prompt"
         else
             rm "$temp_prompt"
@@ -556,7 +570,7 @@ generate_single_context() {
             return 1
         fi
     else
-        if claude < "$temp_prompt" > "$claudemd_file" 2>/dev/null; then
+        if claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" < "$temp_prompt" > "$claudemd_file" 2>/dev/null; then
             rm "$temp_prompt"
         else
             rm "$temp_prompt"
