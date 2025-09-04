@@ -3,7 +3,7 @@
     "Return a string with ASCII art of santa claus in a christmas scene",
     "Return a string with ASCII art of a cute halloween scene"
   ],
-  "num_runners": 1,
+  "num_runners": 3,
   "max_parallel": 3,
   "base_directory": "./results",
   "task_name": "santa-claus-ascii-art",

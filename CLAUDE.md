@@ -32,6 +32,7 @@ ClaudeRunnerWorkflow/
   "max_parallel": 2,
   "project_template": "./my_project",
   "base_directory": "./results", 
+  "contexts_output_dir": "./custom-contexts",
   "runner_contexts": [
     "security-expert",
     {"name": "beginner", "description": "Patient mentor with clear explanations"},
@@ -43,10 +44,10 @@ ClaudeRunnerWorkflow/
 ### Parameter Usage by Script
 
 **`generate-contexts.sh`:**
-- Uses: `prompts` (required), `task_name`, `num_runners`, `runner_contexts` 
+- Uses: `prompts` (required), `task_name`, `num_runners`, `runner_contexts`, `contexts_output_dir`
 - Ignores: `max_parallel`, `base_directory`
 - Auto-generates missing `task_name` and `runner_contexts`
-- Outputs to: `./runner-contexts/` (hardcoded)
+- Outputs to: `contexts_output_dir` (defaults to `./runner-contexts/`)
 
 **`claude-runner.sh`:**
 - Uses: `prompts` (required), all other parameters optional

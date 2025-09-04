@@ -1,0 +1,14 @@
+{
+  "prompts": [
+    "Initialize a new git repository with git init, create an initial README.md file and commit it, then create a new Expo React Native app using 'npx create-expo-app myapp --template blank' and install dependencies with npm install. Verify git repository exists, initial commit is made, and node_modules are installed. After completion, append 'STEP 1: PASS' or 'STEP 1: FAIL: reason' to a file called test-results.log",
+    "Create all application components and logic: a Hello World component that displays text, a custom hook (useCounter or similar), a utility function (formatDate or calculateSum), a small reusable Button component, and a simple reducer for state management. Modify App.js to use these components. Verify all files exist and App.js properly imports them. After completion, append 'STEP 2: PASS' or 'STEP 2: FAIL: reason' to test-results.log",
+    "Set up comprehensive Jest testing suite with unit tests for the utility function and custom hook, integration tests for the reducer, and snapshot tests for the Hello World and Button components. Run npm test and verify all tests pass, snapshots are created in __snapshots__ directory, and test coverage spans unit, integration, and snapshot testing. After completion, append 'STEP 3: PASS' or 'STEP 3: FAIL: reason' to test-results.log",
+    "Create a Node.js script that reads package.json, modifies the version field, and writes it back. Run the script to verify it works. Build the Expo app using npm run build or expo export. Commit all changes to git and verify repository is clean with no uncommitted files. After completion, append 'STEP 4: PASS' or 'STEP 4: FAIL: reason' to test-results.log"
+  ],
+  "num_runners": 1,
+  "task_name": "comprehensive-test",
+  "max_parallel": 1,
+  "runner_contexts": [
+    {"name": "fast-detail-oriented-tester", "description": "Efficient and thorough tester who quickly executes tasks while maintaining attention to detail, verifying each step works correctly before proceeding, and effectively using command-line tools to validate results"}
+  ]
+}

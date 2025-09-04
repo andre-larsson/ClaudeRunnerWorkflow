@@ -1,0 +1,36 @@
+{
+  "prompts": [
+    "Build an offline-first React Native Expo app for notes and todos. Design a unified JSON data model that supports both content types with metadata for sorting, searching, and future extensibility. Prioritize plain text usability while supporting optional formatting",
+    "Create an intuitive content creation flow that respects user intention. Notes should feel like writing on paper - immediate and distraction-free. Todos should feel satisfying to check off. Both types coexist naturally in a single interface. Consider app store/google play guidelines for content creation apps",
+    "Design a theme system where visual personality matches interaction style. Calm themes promote focus with minimal motion. Playful themes celebrate accomplishments. Let the theme choice define the app's behavior, not just its colors",
+    "Craft a list view that reveals just enough information for quick scanning. Use visual hierarchy and typography to communicate state without overwhelming. Every piece of visible metadata should help users make decisions",
+    "Make todo interactions feel natural and responsive. Checking items should provide immediate feedback appropriate to the theme. Editing and reorganizing should feel fluid. Completed work should feel accomplished, not just crossed out",
+    "Implement responsible data ownership with export capabilities. Users should understand their data lives only on their device. Make exporting effortless and importing intelligent. Show data footprint transparently. Never nag, but ensure users can always rescue their content"
+  ],
+  "num_runners": 5,
+  "max_parallel": 1,
+  "base_directory": "./results",
+  "task_name": "notes-app-react-native",
+  "runner_contexts": [
+    {
+      "name": "speed-obsessed",
+      "description": "Performance engineer who treats every millisecond as sacred. Believes loading states are admissions of failure. Thinks about frame rates during animations, debouncing during typing, and instant response to every tap. Prefers aggressive caching over network calls, even offline"
+    },
+    {
+      "name": "offline-reliability",
+      "description": "Developer who assumes the internet doesn't exist. Obsesses over data integrity, atomic operations, and graceful corruption recovery. Believes every byte of user data is precious and should survive app crashes, OS updates, and accidental deletions"
+    },
+    {
+      "name": "neurodiversity-advocate",
+      "description": "Designer for different thinking patterns - ADHD's scattered brilliance, autism's deep focus, dyslexia's visual thinking. Creates multiple organization systems that coexist peacefully. Understands that 'simple' means different things to different brains"
+    },
+    {
+      "name": "retro-gamification",
+      "description": "Game developer who sees productivity as an RPG. Believes checking todos should feel like defeating enemies, streaks deserve celebration, and frequent users should unlock secret features. Adds delight without addiction, achievement without anxiety"
+    },
+    {
+      "name": "power-user",
+      "description": "Heavy note-taker creating 50+ entries daily. Needs bulk operations, keyboard shortcuts everywhere, and templates for common patterns. Thinks in workflows not individual actions. Values efficiency over aesthetics but knows they're not mutually exclusive"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ CONFIG_FILE=""
 TEMPLATE_FILE=""
 FORCE_REGENERATE=false
 DRY_RUN=false
-MODEL="sonnet"
+MODEL="opus"
 ALLOWED_TOOLS="Read,Edit,Write,MultiEdit,Bash,TodoWrite,Glob,Grep"  # Allowed tools for Claude
 
 # Colors for output (consistent with claude-runner.sh style)
@@ -95,6 +95,15 @@ log_error() {
 
 log_dry() {
     echo -e "${BLUE}[DRY-RUN]${NC} $1" >&2
+}
+
+check_rate_limit() {
+    local output="$1"
+    if echo "$output" | grep -q "limit reached"; then
+        log_error "❌ Rate limit reached! Claude API usage limit has been exceeded."
+        log_error "Please wait before running this script again or upgrade your Claude API plan."
+        exit 1
+    fi
 }
 
 parse_arguments() {
@@ -198,7 +207,8 @@ validate_requirements() {
 
 generate_path() {
     local directory="$1"
-    echo "$DEFAULT_OUTPUT_DIR/$directory/CLAUDE.md"
+    local output_dir="${contexts_output_dir:-$DEFAULT_OUTPUT_DIR}"
+    echo "$output_dir/$directory/CLAUDE.md"
 }
 
 generate_name() {
@@ -212,8 +222,14 @@ generate_name() {
         echo "$directory"
         return
     fi
-    # Call Claude and clean up the response
-    local name=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" --permission-mode "plan" -p "Summarize the following string in 1 to 2 words using kebab-case: '$string'" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+    # Call Claude and capture the full response
+    local claude_output=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" --permission-mode "plan" -p "Summarize the following string in 1 to 2 words using kebab-case: '$string'" 2>&1)
+    
+    # Check for rate limit
+    check_rate_limit "$claude_output"
+    
+    # Clean up the response
+    local name=$(echo "$claude_output" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
 
     # truncate
     name=$(echo "$name" | cut -c1-20)
@@ -240,6 +256,13 @@ normalize_runner_contexts() {
     
     # Copy original config
     cp "$config_file" "$temp_config"
+    
+    # Extract contexts_output_dir from config file
+    contexts_output_dir=$(jq -r '.contexts_output_dir // empty' "$config_file")
+    if [ -z "$contexts_output_dir" ] || [ "$contexts_output_dir" = "null" ]; then
+        contexts_output_dir="$DEFAULT_OUTPUT_DIR"
+    fi
+    log_info "Using contexts output directory: $contexts_output_dir"
     
     # Check if task_name exists, if not generate it from prompts
     local task_name=$(jq -r '.task_name // empty' "$temp_config")
@@ -377,21 +400,23 @@ normalize_runner_contexts() {
         fi
     done
     
-    # Update original config if changes were made
-    if [ "$contexts_updated" = true ]; then
-        if [ "$DRY_RUN" = false ]; then
-            # Save the normalized config to a new file
-            local config_dir=$(dirname "$config_file")
-            local config_name=$(basename "$config_file" .json)
-            local new_config_file="$config_dir/$config_name.json.new"
-            
-            cp "$temp_config" "$new_config_file"
-            log_info "Created normalized config: $new_config_file"
-            log_info "Original config unchanged: $config_file"
+    # Always create new config file
+    if [ "$DRY_RUN" = false ]; then
+        # Save the normalized config to a new file
+        local config_dir=$(dirname "$config_file")
+        local config_name=$(basename "$config_file" .json)
+        local new_config_file="$config_dir/$config_name.json.new"
+        
+        cp "$temp_config" "$new_config_file"
+        if [ "$contexts_updated" = true ]; then
+            log_info "Created new config with updates: $new_config_file"
         else
-            log_dry "Would create normalized config: $(dirname "$config_file")/$(basename "$config_file" .json).json.new"
-            log_dry "Original config would remain unchanged"
+            log_info "Created new config (no changes needed): $new_config_file"
         fi
+        log_info "Original config unchanged: $config_file"
+    else
+        log_dry "Would create normalized config: $(dirname "$config_file")/$(basename "$config_file" .json).json.new"
+        log_dry "Original config would remain unchanged"
     fi
     
     # Return the normalized config content
@@ -442,12 +467,13 @@ TEMPLATE REFERENCE: Use the CLAUDE.md template provided as context to understand
 Please create a comprehensive CLAUDE.md file that includes:
 
 1. **Context Title**: Clear header describing the project
-2. **Primary Priorities**: 3-4 main focus areas
+2. **Primary Priorities**: 3-5 main focus areas
 3. **Guidelines**: Specific rules and approaches to follow  
-4. **Code Style**: Preferred coding patterns and practices
-5. **Review Checklist**: Key items to verify in completed work
+4. **Code Style**: Preferred coding patterns and best practices
+5. **CLAUDE.md update instructions**: Instructions to update CLAUDE.md after each major change.
 
 Format the output as proper markdown with clear sections. The content should be detailed enough to meaningfully influence Claude's behavior but concise enough to be practical.
+Avoid code examples or libraries, focus on overall approach, design and architecture.
 
 Return ONLY the CLAUDE.md file content - no explanations, no wrapper text, just the markdown content that should be saved as CLAUDE.md."
 
@@ -490,7 +516,17 @@ context_description_from_prompts() {
     
     meta_prompt+="\n\nFocus on a specific expertise, personality, or approach that would be genuinely different and valuable. Examples: 'Accessibility-first developer', 'Performance optimization expert', 'Minimalist coder', 'Security-paranoid architect', 'Chaos engineer', 'Documentation obsessive', 'Legacy system archaeologist'. Return only the description."
     
-    echo "$meta_prompt" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" 2>/dev/null || echo "Creative problem-solving expert with unconventional approaches"
+    local claude_output=$(echo "$meta_prompt" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" 2>&1)
+    
+    # Check for rate limit
+    check_rate_limit "$claude_output"
+    
+    # Return the output or fallback
+    if [ -z "$claude_output" ]; then
+        echo "Creative problem-solving expert with unconventional approaches"
+    else
+        echo "$claude_output"
+    fi
 }
 
 generate_single_context() {
@@ -562,7 +598,14 @@ generate_single_context() {
     # Run Claude CLI and capture output
     if [ -n "$effective_template" ]; then
         log_info "Using template: $effective_template"
-        if cat "$effective_template" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" -p "$(cat "$temp_prompt")" > "$claudemd_file" 2>/dev/null; then
+        local claude_output=$(cat "$effective_template" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" -p "$(cat "$temp_prompt")" 2>&1)
+        
+        # Check for rate limit
+        check_rate_limit "$claude_output"
+        
+        # Write output to file if successful
+        if [ -n "$claude_output" ]; then
+            echo "$claude_output" > "$claudemd_file"
             rm "$temp_prompt"
         else
             rm "$temp_prompt"
@@ -570,7 +613,14 @@ generate_single_context() {
             return 1
         fi
     else
-        if claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" < "$temp_prompt" > "$claudemd_file" 2>/dev/null; then
+        local claude_output=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" < "$temp_prompt" 2>&1)
+        
+        # Check for rate limit
+        check_rate_limit "$claude_output"
+        
+        # Write output to file if successful
+        if [ -n "$claude_output" ]; then
+            echo "$claude_output" > "$claudemd_file"
             rm "$temp_prompt"
         else
             rm "$temp_prompt"

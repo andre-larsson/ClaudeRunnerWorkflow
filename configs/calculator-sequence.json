@@ -1,9 +1,10 @@
 {
   "prompts": [
-    "Create a basic HTML page with a calculator interface - just the layout with buttons for numbers 0-9, basic operations (+, -, *, /), equals, and clear",
-    "Add CSS styling to make the calculator look professional and modern with a nice color scheme",
-    "Add JavaScript functionality to make the calculator actually work - handle button clicks, perform calculations, and display results",
-    "Add advanced features like keyboard support, decimal point handling, and basic error checking for division by zero"
+    "Build a basic HTML calculator with number buttons (0-9), basic operations (+, -, *, /), equals, and clear. Add simple CSS styling and core JavaScript functionality for calculations",
+    "Enhance the calculator with modern responsive CSS styling, dark/light theme toggle, and improved UX with better button layouts and visual feedback",
+    "Add advanced features: keyboard support, decimal point handling, comprehensive error checking, and input validation for edge cases",
+    "Extend to scientific calculator: add trigonometric functions (sin, cos, tan), logarithmic (log, ln), exponential, square root, power operations, and constants (π, e)",
+    "Add graphing functionality with HTML5 canvas to plot mathematical functions, multiple function support with different colors, zoom/pan controls, and coordinate grid"
   ],
   "num_runners": 3,
   "max_parallel": 1,

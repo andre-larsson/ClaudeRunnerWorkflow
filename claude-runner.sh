@@ -425,7 +425,7 @@ setup_runner() {
     
     # Create prompt info for info.txt
     local prompt_count=$(echo "$PROMPTS" | jq 'length')
-    local prompt_info="Sequence of $prompt_count prompts (see prompt_*.log files)"
+    local prompt_info="Sequence of $prompt_count prompts (see prompt_*_response.log files)"
     
     cat > "$runner_dir/info.txt" << EOF
 Runner: $runner_num
@@ -440,6 +440,7 @@ EOF
 # Run Claude for a single runner
 run_claude() {
     local runner_num=$1
+    local total_runners=$2
     local runner_dir=$(setup_runner "$runner_num")
     
     echo "[Runner $runner_num] Starting in $runner_dir"
@@ -459,9 +460,9 @@ run_claude() {
         for i in $(seq 0 $((prompt_count-1))); do
             local current_prompt=$(echo "$PROMPTS" | jq -r ".[$i]")
             local prompt_num=$((i+1))
-            local log_file="logs/prompt_${prompt_num}.log"
+            local log_file="logs/prompt_${prompt_num}_response.log"
             
-            echo "[Runner $runner_num] Executing prompt $prompt_num/$prompt_count"
+            echo "[Runner $runner_num] Executing prompt $prompt_num/$prompt_count for runner $runner_num/$total_runners"
             echo "=== PROMPT $prompt_num ===" >> "$log_file"
             echo "$current_prompt" >> "$log_file"
             echo "=== OUTPUT ===" >> "$log_file"
@@ -520,7 +521,7 @@ run_parallel() {
         done
         
         # Start new job
-        run_claude $i &
+        run_claude $i "$NUM_RUNNERS" &
         local new_pid=$!
         pids+=($new_pid)
         echo "[Manager] Started runner $i (PID: $new_pid)"
@@ -531,7 +532,7 @@ run_parallel() {
     
     # Wait for all remaining jobs with progress
     echo "[Manager] All runners started. Waiting for completion..."
-    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/*/logs/prompt_*.log"
+    echo "[Manager] Tip: Check progress with: tail -f $RUN_DIR/*/logs/prompt_*_response.log"
     
     local completed=0
     for pid in "${pids[@]}"; do
@@ -641,7 +642,7 @@ echo "│   ├── info.txt             # Runner details"
 echo "│   ├── status.txt           # Status"
 echo "│   ├── logs/"
 echo "│   │   ├── timing.log       # Start/end times"
-echo "│   │   └── prompt_*.log     # Claude output per prompt"
+echo "│   │   └── prompt_*_response.log     # Claude output per prompt"
 echo "└── README.md                # Run summary with status table"
 echo ""
 echo "Index updated: $INDEX_FILE"
