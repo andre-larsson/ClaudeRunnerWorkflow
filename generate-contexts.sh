@@ -214,32 +214,78 @@ generate_path() {
 generate_name() {
     local string="$1"
 
-    echo "WARNING: Generating name for '$string'. Results may be unpredictable."
+    # Log warning to stderr, not stdout (to avoid it being captured in the name)
+    log_warn "Generating name for '$string'. Results may be unpredictable." >&2
 
     if [ "$DRY_RUN" = true ]; then
         # In dry-run, just sanitize the string to a directory name
-        local directory=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+        local directory=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//' | cut -c1-20)
         echo "$directory"
         return
     fi
+    
     # Call Claude and capture the full response
     local claude_output=$(claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" --permission-mode "plan" -p "Summarize the following string in 1 to 2 words using kebab-case: '$string'" 2>&1)
     
     # Check for rate limit
     check_rate_limit "$claude_output"
     
-    # Clean up the response
-    local name=$(echo "$claude_output" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
-
-    # truncate
-    name=$(echo "$name" | cut -c1-20)
+    # Clean up the response and truncate
+    local name=$(echo "$claude_output" | tr -d '\n' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//' | cut -c1-20)
 
     # If Claude returns empty or just whitespace, fall back to sanitized original
     if [ -z "$name" ]; then
-        name=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+        name=$(echo "$string" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9-]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//' | cut -c1-20)
     fi
     
     echo "$name"
+}
+
+analyze_and_split_prompts() {
+    local prompt_string="$1"
+    
+    log_info "Analyzing prompt complexity for potential splitting..."
+    
+    if [ "$DRY_RUN" = true ]; then
+        # In dry-run, just return the original prompt as single element array
+        echo "[\"$prompt_string\"]"
+        return
+    fi
+    
+    # Create analysis prompt for Claude
+    local analysis_prompt="Analyze this task and determine if it should be split into multiple sequential steps:
+
+'$prompt_string'
+
+Guidelines:
+- If it's a simple, single-action task (like 'create a file', 'write hello world program', 'add a button'), return the original prompt as a single-element array
+- If it's a complex project (like 'create a scientific calculator', 'build an adventure game', 'develop a web application'), break it into logical sequential steps
+- Each step should be clear, actionable, and build upon the previous steps
+- Aim for 3-7 steps for complex tasks
+- Focus on major milestones, not micro-steps
+
+Examples:
+Simple task: [\"Create a hello world Python script\"]
+Complex task: [\"Create basic HTML structure with calculator layout\", \"Add number buttons and display functionality\", \"Implement basic arithmetic operations\", \"Add scientific functions and advanced features\", \"Style the calculator with modern CSS\"]
+
+Return ONLY a valid JSON array of strings, no explanation or additional text."
+
+    # Call Claude and capture the full response
+    local claude_output=$(echo "$analysis_prompt" | claude --model "$MODEL" --allowedTools "$ALLOWED_TOOLS" 2>&1)
+    
+    # Check for rate limit
+    check_rate_limit "$claude_output"
+    
+    # Validate the response is valid JSON array
+    if echo "$claude_output" | jq . >/dev/null 2>&1 && echo "$claude_output" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        log_info "Successfully split prompt into $(echo "$claude_output" | jq 'length') steps"
+        echo "$claude_output"
+    else
+        log_warn "Failed to parse Claude response as JSON array, using original prompt"
+        log_warn "Claude response: $claude_output"
+        # Fallback: create single-element array with original prompt
+        echo "[\"$prompt_string\"]"
+    fi
 }
 
 normalize_runner_contexts() {
@@ -256,6 +302,34 @@ normalize_runner_contexts() {
     
     # Copy original config
     cp "$config_file" "$temp_config"
+    
+    # Check if prompts field is a string and needs to be split
+    local prompts_type=$(jq -r '.prompts | type' "$temp_config")
+    if [ "$prompts_type" = "string" ]; then
+        log_info "Found string prompts field, analyzing for potential splitting..."
+        local prompt_string=$(jq -r '.prompts' "$temp_config")
+        
+        # Analyze and split the prompt
+        local split_prompts=$(analyze_and_split_prompts "$prompt_string")
+        
+        if [ -n "$split_prompts" ]; then
+            # Update config with split prompts array
+            jq ".prompts = $split_prompts" "$temp_config" > "${temp_config}.tmp"
+            mv "${temp_config}.tmp" "$temp_config"
+            contexts_updated=true
+            
+            local num_prompts=$(echo "$split_prompts" | jq 'length')
+            log_info "Converted string prompt to array with $num_prompts step(s)"
+        else
+            log_error "Failed to analyze prompt, keeping as string"
+        fi
+    elif [ "$prompts_type" = "null" ]; then
+        log_error "No prompts field found in config"
+        rm "$temp_config"
+        return 1
+    else
+        log_info "Using existing prompts array"
+    fi
     
     # Extract contexts_output_dir from config file
     contexts_output_dir=$(jq -r '.contexts_output_dir // empty' "$config_file")
