@@ -29,10 +29,10 @@ You can run claude-runner.sh directly from command line:
 
 ```bash
 # Multiple prompts in sequence, two runners run sequentially  
-./claude-runner.sh -p "Create HTML" "Add CSS" "Add JavaScript" -n 2 -m 1
+./claude-runner.sh -p "Create the game Snake in React" "Add unit tests to game" "Review game, suggest and implements any possible improvements" -n 2 -m 1
 
 # With project template
-./claude-runner.sh -p "Refactor this code" -n 3 --template-directory ./my-project
+./claude-runner.sh -p "Refactor this code for improved readability and maintainability, considering separation of concerns." -n 3 --template-directory ./my-project
 
 # Print available options
 ./claude-runner.sh --help
@@ -105,13 +105,13 @@ cat results/*/00003_*/file1.txt
 
 1. **generate-contexts.sh** auto-generates:
    - Task name: `ascii-art` (from prompt)
-   - 3 random contexts: `ascii-art-designer`, `creative-artist`, `minimalist-approach`
-   - CLAUDE.md files with different personalities in `runner_contexts/` directory
+   - Since runner_contexts is not provided, random context names will be generated, for example: `ascii-art-designer`, `creative-artist`, `minimalist-approach`
+   - Additionally, CLAUDE.md files with different personalities matching the context names will be generated in `runner_contexts/` directory
 
 2. **claude-runner.sh** runs 3 parallel Claude instances:
    - Each gets the same prompt
    - Each uses a different context/personality (CLAUDE.md files)
-   - Each produces different results
+   - Each does the same thing but with different approaches
    - Directory names: `00001_<context-name>/`, `00002_<context-name>/`, etc.
 
 
@@ -135,9 +135,9 @@ Build a web calculator, compare results from three different approaches
 ```
 
 #### What Will Happen
-- `generate-contexts.sh config.json` will generate 3 CLAUDE.md files based on the provided text strings and create a new config file.
-- `claude-runner.sh config.json.new` will run 3 parallel Claude instances, each using a different context/personality (CLAUDE.md file). Reasonable defaults would be used for the rest of the config.
-- `claude-runner.sh config.json` would run as above, but with `runner_contexts` ignored as no CLAUDE.md files were provided.
+- `generate-contexts.sh config.json` For simple string items in runner_contexts, a CLAUDE.md file will be created based on the provided text. New config file containing file paths of generated CLAUDE.md files will be created, for use in the claude-runner.sh script.
+- `claude-runner.sh config.json.new` will run 3 parallel Claude instances, each using the different context/personalities (CLAUDE.md files) that was generated in previous step. Reasonable defaults would be used for the rest of the config (see --help).
+- `claude-runner.sh config.json` Running claude-runner.sh with the original config file, would ignore `runner_contexts` since this script requires path to already generated CLAUDE.md files to use as context, meaning all claude code instances get the same (no) context.
 
 
 ### Multi-Prompt Workflow
@@ -164,10 +164,7 @@ Build a web calculator with additional instructions for error handling and unit 
 #### What Will Happen
 - `generate-contexts.sh config.json` will generate 2 CLAUDE.md files based on the provided text strings and create a new config file.
 - `claude-runner.sh config.json.new` will run 5 parallel Claude instances, each executing the three prompts in sequence, each using a different context/personality (CLAUDE.md file) rotating through the two contexts in the order they are provided.
-- `claude-runner.sh config.json` would run as above, but with no CLAUDE.md files for context, since no such files were provided.
-
-#### Notes
-- In this example, the three prompts could have been combined into one. However, results may vary.
+- `claude-runner.sh config.json` would run as above, but with no CLAUDE.md files for context, since no such files were provided in the original config for runner_contexts.
 
 ## Run from existing project
 ```json
@@ -241,11 +238,9 @@ Quest Seeker Online is a browser-based online game, where the user can join othe
 
 See `generate-contexts.sh --help` and `claude-runner.sh --help` for available parameters.
 
-
 ## Notes
 
-- If you have Claude Code with a subscription, you will of course eventually run into the rate-limit if you spawn enough runners.
-- If this happens, claude-runner will wait for one hour and try again, five times, for each prompt, meaning your task should eventually complete, even if it takes a while.
-- I'm not using git for version control of the runs to avoid nested git repositories.
+- If you run inte a rate-limit, claude-runner will wait for one hour and try again, five times, for each prompt, meaning your task should eventually complete, even if it takes a while.
+- I'm not using git for version control of the individual runs to avoid nested git repositories (since CRW is a git repo).
 - This project was of course written with the help of claude code, guided by a human hand (promise).
 - claude-runner.sh can start claude instances either in parallel or sequential, while generate-contexts.sh runs everything after each other.
