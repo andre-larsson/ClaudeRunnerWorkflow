@@ -217,7 +217,7 @@ Quest Seeker Online is a browser-based online game, where the user can join othe
 ```json
 {
   "prompts": [
-    "Review the current state of the project and think about possible extensions. Update CLAUDE.md with most important tasks to do next.",// Including 'think' makes claude use thinking
+    "Review the current state of the project and think about possible extensions. Update CLAUDE.md with most important tasks to do next.",
     "Look at the most important tasks in CLAUDE.md and implement them.",
     // repeat the two prompts above ad infinitum, or until we run out of compute/money for running claude...
     "Review the current state of the project and think about possible extensions. Update CLAUDE.md with most important tasks to do next.",
@@ -232,7 +232,7 @@ Quest Seeker Online is a browser-based online game, where the user can join othe
 ```
 
 #### What Will Happen
-- `claude-runner.sh config.json` will run 5 parallel Claude instances, each starting from the CLAUDE.md file in the project directory, each running all prompts in sequence. At the end of the run, you should have five different,  fun(?) and not-crashing(?) web-based RPG games to enjoy.
+- `claude-runner.sh config.json` will run 5 parallel Claude instances, each starting from the CLAUDE.md file in the project directory, each running all prompts in sequence. At the end of the run, you should have five different, fun(?) and not-crashing(?) web-based RPG games to enjoy.
 
 ### Parameters
 
