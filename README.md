@@ -61,6 +61,117 @@ Config files provide full control over runner contexts, execution parameters, an
 }
 ```
 
+## Prompts and Runner Contexts Configuration
+
+> **Important:** The behaviors described below apply to `generate-contexts.sh`. When running `claude-runner.sh` directly, different rules apply (see [Script-Specific Behavior](#script-specific-behavior) below).
+
+### Prompts Field (generate-contexts.sh)
+
+The `prompts` field supports two formats:
+
+#### String Format (Auto-Split)
+```json
+{
+  "prompts": "Create a scientific calculator with advanced functions and modern styling"
+}
+```
+**Behavior:** The system automatically analyzes the complexity and splits into logical steps:
+- Simple tasks remain as single steps
+- Complex projects get broken into 3-7 sequential steps
+- Example output: `["Create basic HTML calculator layout", "Add number buttons and display", "Implement arithmetic operations", "Add scientific functions", "Apply modern CSS styling"]`
+
+#### Array Format (Explicit Steps)
+```json
+{
+  "prompts": [
+    "Create calculator function",
+    "Add error handling",
+    "Write unit tests"
+  ]
+}
+```
+**Behavior:** Steps are executed exactly as provided in sequence.
+
+### Runner Contexts Field (generate-contexts.sh)
+
+The `runner_contexts` field supports multiple formats and can be omitted entirely:
+
+#### Simple Strings
+```json
+{
+  "runner_contexts": [
+    "security expert",
+    "performance optimizer",
+    "accessibility focused"
+  ]
+}
+```
+**Behavior:** Generates CLAUDE.md files with personalities matching each string.
+
+#### Detailed Objects
+```json
+{
+  "runner_contexts": [
+    {
+      "name": "security-auditor",
+      "description": "Focus on security vulnerabilities and best practices"
+    },
+    {
+      "name": "beginner",
+      "description": "Patient mentor with clear explanations"
+    }
+  ]
+}
+```
+**Behavior:** Generates CLAUDE.md files using name and description for personality creation.
+
+#### Custom CLAUDE.md Files
+```json
+{
+  "runner_contexts": [
+    {"claudemd_file": "contexts/expert.md"},
+    {"claudemd_file": "contexts/beginner.md"}
+  ]
+}
+```
+**Behavior:** Uses existing CLAUDE.md files directly (no generation needed).
+
+#### Mixed Formats
+```json
+{
+  "runner_contexts": [
+    "security expert",
+    {"name": "optimizer", "description": "Performance-focused developer"},
+    {"claudemd_file": "custom/specialist.md"}
+  ]
+}
+```
+**Behavior:** Handles each format appropriately - generates files for strings/objects, uses existing files for paths.
+
+#### Omitted (Auto-Generation)
+```json
+{
+  "prompts": ["Create a calculator"]
+}
+```
+**Behavior:** When `runner_contexts` is not provided:
+- Auto-generates creative context names based on the task
+- Creates matching CLAUDE.md files with diverse personalities
+- Number of contexts matches `num_runners` (default: 3)
+
+### Script-Specific Behavior
+
+#### generate-contexts.sh
+- **Prompts:** Supports string auto-splitting and array formats
+- **Runner Contexts:** Generates CLAUDE.md files from strings/objects, validates existing files
+- **Output:** Creates `.new` config file with generated `claudemd_file` paths
+
+#### claude-runner.sh
+- **Prompts:** Requires array format
+- **Runner Contexts:** Only accepts existing `claudemd_file` paths, ignores strings/objects
+- **Behavior:** If `runner_contexts` contains non-file entries, they are filtered out
+- **Fallback:** Uses project template CLAUDE.md or no context if no valid files found
+
 ## Config File Examples
 
 ### Minimal Workflow
